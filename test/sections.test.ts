@@ -284,6 +284,17 @@ describe("popup and button configs", () => {
     assert.equal(JSON.stringify(popup).includes("custom:bubble-card"), false);
   });
 
+  it("gives the media player Mushroom's control lists", () => {
+    const cards = buildPopupCards({
+      ...emptySections(),
+      mediaPlayers: ["media_player.tv"],
+    });
+    const media = cards.find((card) => String(card.type).endsWith("media-player-card"));
+    assert.ok(Array.isArray(media?.media_controls));
+    assert.ok(Array.isArray(media?.volume_controls));
+    assert.equal(media?.media_controls.includes("play_pause_stop"), true);
+  });
+
   it("omits empty section headings", () => {
     const cards = buildPopupCards(emptySections());
     assert.deepEqual(cards, []);
