@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { buildButtonConfig } from "../src/button-config";
-import { buildPopupCards } from "../src/popup-cards";
+import { buildPopupCards, buildPopupConfig } from "../src/popup-cards";
 import {
   classifyArea,
   emptySections,
@@ -276,6 +276,14 @@ describe("classifyArea", () => {
 });
 
 describe("popup and button configs", () => {
+  it("opens as the private bubble popup, not the legacy vertical-stack popup", () => {
+    const popup = buildPopupConfig("bedroom", "Master Bedroom", "mdi:bed", emptySections());
+    assert.equal(popup.type, "custom:area-card-bubble");
+    assert.equal(popup.card_type, "pop-up");
+    assert.equal(popup.hash, "#area-bedroom");
+    assert.equal(JSON.stringify(popup).includes("custom:bubble-card"), false);
+  });
+
   it("omits empty section headings", () => {
     const cards = buildPopupCards(emptySections());
     assert.deepEqual(cards, []);

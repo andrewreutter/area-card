@@ -1,5 +1,5 @@
 import type { AreaSections } from "./sections";
-import { areaHash } from "./tags";
+import { areaHash, BUBBLE_CARD_TYPE } from "./tags";
 
 export interface ButtonConfigInput {
   areaId: string;
@@ -49,6 +49,7 @@ export function buildButtonConfig(input: ButtonConfigInput): Record<string, unkn
   }
 
   return {
+    type: BUBBLE_CARD_TYPE,
     card_type: "button",
     button_type: "name",
     name: input.name,

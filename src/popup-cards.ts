@@ -1,5 +1,5 @@
 import type { AreaSections } from "./sections";
-import { areaHash, mushroomCardType } from "./tags";
+import { areaHash, BUBBLE_CARD_TYPE, mushroomCardType } from "./tags";
 
 const FULL = { columns: 12 };
 
@@ -10,6 +10,7 @@ export function buildPopupConfig(
   sections: AreaSections,
 ): Record<string, unknown> {
   return {
+    type: BUBBLE_CARD_TYPE,
     card_type: "pop-up",
     hash: areaHash(areaId),
     name,
