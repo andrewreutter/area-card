@@ -1,0 +1,19 @@
+{
+  "name": "area-card",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Home Assistant Lovelace card that shows an area button and its popup.",
+  "scripts": {
+    "prefix-vendor": "node scripts/prefix-vendor.mjs",
+    "build": "npm run prefix-vendor && rollup -c",
+    "test": "tsx --test test/*.test.ts"
+  },
+  "devDependencies": {
+    "@rollup/plugin-typescript": "^12.1.4",
+    "rollup": "^4.52.5",
+    "tslib": "^2.8.1",
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.3"
+  }
+}
