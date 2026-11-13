@@ -1,3 +1,4 @@
+import { pictureBackgroundStyles } from "./picture";
 import { emptyRollupDotClass, ROLLUP_ORDER, rollupDotClass, rollupDotStyles, sectionRollups, type RollupId } from "./rollups";
 import type { AreaSections, EntityState } from "./sections";
 import { areaHash, BUBBLE_CARD_TYPE } from "./tags";
@@ -10,7 +11,22 @@ export interface ButtonConfigInput {
   states?: Record<string, EntityState | undefined>;
   /** Ordered list of section ids to include as dot sub-buttons. Defaults to all slots (ROLLUP_ORDER). */
   dotSlots?: readonly RollupId[];
+  picture?: string | null;
+  unavailable?: boolean;
 }
+
+/** Same treatment Bubble applies to a button whose entity is unavailable. */
+const UNAVAILABLE_BUTTON_STYLES = [
+  "ha-card {",
+  "  opacity: 0.5 !important;",
+  "}",
+  ".bubble-wrapper {",
+  "  cursor: not-allowed;",
+  "}",
+  ".bubble-buttons-container {",
+  "  display: none;",
+  "}",
+].join("\n");
 
 export function buildButtonConfig(input: ButtonConfigInput): Record<string, unknown> {
   const hash = areaHash(input.areaId);
@@ -60,7 +76,18 @@ export function buildButtonConfig(input: ButtonConfigInput): Record<string, unkn
       double_tap_action: { action: "none" },
     },
     sub_button: subButtons,
-    styles: rollupDotStyles(rollups),
+    styles: buttonStyles(rollups, input.picture, input.unavailable),
   };
   return config;
+}
+
+function buttonStyles(
+  rollups: ReturnType<typeof sectionRollups>,
+  picture: string | null | undefined,
+  unavailable: boolean | undefined,
+): string {
+  const parts = [rollupDotStyles(rollups)];
+  if (picture) parts.push(pictureBackgroundStyles(picture, "button"));
+  if (unavailable) parts.push(UNAVAILABLE_BUTTON_STYLES);
+  return parts.join("\n");
 }

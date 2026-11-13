@@ -142,10 +142,7 @@ class FloorCard extends HTMLElement {
     // Keep chevron in sync with collapse state
     this.syncChevron();
 
-    // Keep body visibility in sync with collapse state
-    if (this.bodyEl) {
-      this.bodyEl.style.display = this._expanded ? "" : "none";
-    }
+    this.syncBody();
 
     // Rebuild area list when membership changes
     if (this.renderedAreas !== areasKey) {
@@ -306,9 +303,14 @@ class FloorCard extends HTMLElement {
   private toggle(): void {
     this._expanded = !this._expanded;
     this.syncChevron();
-    if (this.bodyEl) {
-      this.bodyEl.style.display = this._expanded ? "" : "none";
-    }
+    this.syncBody();
+  }
+
+  private syncBody(): void {
+    if (!this.bodyEl) return;
+    // An empty display value clears the flex set on the body, so the 8px gap
+    // never applies and the area cards stack with no column gap.
+    this.bodyEl.style.display = this._expanded ? "flex" : "none";
   }
 
   private showError(message: string): void {

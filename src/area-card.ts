@@ -5,7 +5,7 @@ import "./floor-card";
 import "./light-row";
 import { buildPopupConfig } from "./popup-cards";
 import { parseHideSections, ROLLUP_ORDER, sectionRollups, sectionTitle, type RollupId, type SectionRollup, withoutSections } from "./rollups";
-import { areaDisplay, classifyArea, membershipKey, type ClassifierHass } from "./sections";
+import { areaDisplay, areaUnavailable, classifyArea, membershipKey, type ClassifierHass } from "./sections";
 import { BUBBLE_ELEMENT } from "./tags";
 
 interface AreaCardConfig {
@@ -130,7 +130,8 @@ class AreaCard extends HTMLElement {
     const hass = this._hass;
     const areaId = this._config.area;
     const hide = this._config.hide_sections;
-    const { name, icon } = areaDisplay(hass, areaId);
+    const { name, icon, picture } = areaDisplay(hass, areaId);
+    const unavailable = areaUnavailable(hass, areaId);
     const sections = classifyArea(hass, areaId);
     const visibleSections = withoutSections(sections, hide);
     const signature = membershipKey(areaId, name, icon, sections);
@@ -144,8 +145,10 @@ class AreaCard extends HTMLElement {
       sections: visibleSections,
       states,
       dotSlots,
+      picture,
+      unavailable,
     });
-    const popupConfig = buildPopupConfig(areaId, name, icon, visibleSections, states);
+    const popupConfig = buildPopupConfig(areaId, name, icon, visibleSections, states, picture);
     const buttonKey = JSON.stringify(buttonConfig);
     const popupKey = JSON.stringify(popupConfig);
 
@@ -156,6 +159,10 @@ class AreaCard extends HTMLElement {
       this.popupEl?.remove();
       this.buttonEl = document.createElement(BUBBLE_ELEMENT) as BubbleElement;
       this.popupEl = document.createElement(BUBBLE_ELEMENT) as BubbleElement;
+      // Bubble's host is inline-block. The closed popup is 0px tall and still
+      // wraps onto a line box under the button, which shows up as extra padding.
+      this.buttonEl.style.display = "block";
+      this.popupEl.style.display = "block";
       this.dataset.area = areaId;
       this.append(this.buttonEl, this.popupEl);
       this.signature = signature;

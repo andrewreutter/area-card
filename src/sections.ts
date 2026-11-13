@@ -30,6 +30,7 @@ export interface AreaEntry {
   area_id?: string;
   name?: string;
   icon?: string | null;
+  picture?: string | null;
   floor_id?: string | null;
 }
 
@@ -45,6 +46,7 @@ export interface ClassifierHass {
   devices?: Record<string, DeviceEntry> | DeviceEntry[];
   areas?: Record<string, AreaEntry>;
   floors?: Record<string, FloorEntry>;
+  hassUrl?: (path: string) => string;
 }
 
 export interface OccupancyItem {
@@ -91,12 +93,49 @@ export function emptySections(): AreaSections {
   };
 }
 
-export function areaDisplay(hass: ClassifierHass, areaId: string): { name: string; icon: string } {
+export function areaDisplay(
+  hass: ClassifierHass,
+  areaId: string,
+): { name: string; icon: string; picture: string | null } {
   const area = hass.areas?.[areaId];
   return {
     name: area?.name || areaId,
     icon: area?.icon || "mdi:door",
+    picture: resolvePicture(hass, area?.picture),
   };
+}
+
+const PURE_HELPER_DOMAINS = new Set(["input_boolean", "input_select", "timer"]);
+
+/**
+ * True when the area has device entities and every one of them is unavailable.
+ * Pure helpers and template helpers that are not device entities are ignored.
+ * An area with no device entities stays available.
+ */
+export function areaUnavailable(hass: ClassifierHass, areaId: string): boolean {
+  const devices = deviceMap(hass.devices);
+  const states = hass.states ?? {};
+  const deviceEntities = registryEntries(hass).filter((entry) => {
+    if (!entry.entity_id || !states[entry.entity_id]) return false;
+    if (isHidden(entry)) return false;
+    if (areaOf(entry, devices) !== areaId) return false;
+    return isDeviceEntity(entry);
+  });
+  if (deviceEntities.length === 0) return false;
+  return deviceEntities.every((entry) => states[entry.entity_id]?.state === "unavailable");
+}
+
+function resolvePicture(hass: ClassifierHass, picture: string | null | undefined): string | null {
+  if (!picture) return null;
+  if (typeof hass.hassUrl !== "function") return picture;
+  return hass.hassUrl(picture);
+}
+
+function isDeviceEntity(entry: RegistryEntry): boolean {
+  const domain = entry.entity_id.split(".")[0] ?? "";
+  if (PURE_HELPER_DOMAINS.has(domain)) return false;
+  if (entry.platform === "template" && !entry.device_id) return false;
+  return Boolean(entry.device_id);
 }
 
 export function classifyArea(hass: ClassifierHass, areaId: string): AreaSections {

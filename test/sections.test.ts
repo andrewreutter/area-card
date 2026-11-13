@@ -7,6 +7,8 @@ import { tooltipPosition } from "../src/dot-tooltip";
 import { buildPopupCards, buildPopupConfig } from "../src/popup-cards";
 import { dotTooltipLabel, parseHideSections, ROLLUP_ORDER, rollupLabel, sectionHasEntities, sectionRollups, sectionTitle, withoutSections, type RollupId } from "../src/rollups";
 import {
+  areaDisplay,
+  areaUnavailable,
   classifyArea,
   emptySections,
   type AreaEntry,
@@ -1238,5 +1240,152 @@ describe("floor-wide section hiding", () => {
     // every() on empty array is vacuously true — all ids would be hidden
     // The floor card guards against this by returning [] when areas.length === 0
     assert.equal(hide.length, ROLLUP_ORDER.length);
+  });
+});
+
+describe("area pictures", () => {
+  const picture = 'https://ha.local/api/image/serve/abc")def';
+
+  it("resolves a picture through hassUrl and leaves a path alone otherwise", () => {
+    const withUrl = areaDisplay(
+      {
+        areas: { kitchen: { name: "Kitchen", picture: "/api/image/serve/kitchen" } },
+        hassUrl: (path) => `http://treetop:8123${path}`,
+      },
+      "kitchen",
+    );
+    assert.equal(withUrl.picture, "http://treetop:8123/api/image/serve/kitchen");
+    const plain = areaDisplay(
+      { areas: { kitchen: { name: "Kitchen", picture: "/api/image/serve/kitchen" } } },
+      "kitchen",
+    );
+    assert.equal(plain.picture, "/api/image/serve/kitchen");
+    assert.equal(areaDisplay({ areas: { kitchen: { name: "Kitchen" } } }, "kitchen").picture, null);
+  });
+
+  it("paints the picture on the button and the popup, and escapes quotes", () => {
+    const button = buildButtonConfig({
+      areaId: "kitchen",
+      name: "Kitchen",
+      icon: "mdi:pot-steam",
+      sections: emptySections(),
+      picture,
+    });
+    const popup = buildPopupConfig("kitchen", "Kitchen", "mdi:pot-steam", emptySections(), {}, picture);
+    const buttonStyles = String(button.styles);
+    const popupStyles = String(popup.styles);
+    const escaped = JSON.stringify(picture);
+    assert.ok(buttonStyles.includes(`url(${escaped})`));
+    assert.ok(popupStyles.includes(`url(${escaped})`));
+    assert.match(buttonStyles, /\.bubble-background[\s\S]*background-image: linear-gradient\(90deg/);
+    assert.match(popupStyles, /\.bubble-pop-up-background[\s\S]*linear-gradient\(to bottom/);
+    assert.match(buttonStyles, /color:\s*#fff !important/);
+    assert.match(popupStyles, /color:\s*#fff !important/);
+    assert.equal(buttonStyles.includes('url("' + picture + '")'), false);
+  });
+
+  it("leaves both surfaces without a background image when the area has no picture", () => {
+    const button = buildButtonConfig({
+      areaId: "kitchen",
+      name: "Kitchen",
+      icon: "mdi:pot-steam",
+      sections: emptySections(),
+    });
+    const popup = buildPopupConfig("kitchen", "Kitchen", "mdi:pot-steam", emptySections());
+    assert.equal(String(button.styles).includes("background-image"), false);
+    assert.equal(popup.styles, undefined);
+  });
+});
+
+describe("areaUnavailable", () => {
+  it("marks an area unavailable when every device entity is unavailable", () => {
+    const result = areaUnavailable(
+      hass({
+        devices: [{ id: "shed-dev", area_id: "shed" }],
+        entities: [
+          { entity_id: "light.shed", device_id: "shed-dev" },
+          { entity_id: "binary_sensor.shed_door", device_id: "shed-dev" },
+          { entity_id: "input_boolean.shed_guest", area_id: "shed" },
+          { entity_id: "sensor.shed_note", area_id: "shed", platform: "template" },
+        ],
+        states: {
+          "light.shed": state("light.shed", "unavailable"),
+          "binary_sensor.shed_door": state("binary_sensor.shed_door", "unavailable"),
+          "input_boolean.shed_guest": state("input_boolean.shed_guest", "on"),
+          "sensor.shed_note": state("sensor.shed_note", "on"),
+        },
+      }),
+      "shed",
+    );
+    assert.equal(result, true);
+  });
+
+  it("stays available when one device entity is available", () => {
+    const result = areaUnavailable(
+      hass({
+        devices: [{ id: "kitchen-dev", area_id: "kitchen" }],
+        entities: [
+          { entity_id: "light.kitchen", device_id: "kitchen-dev" },
+          { entity_id: "sensor.kitchen_temp", device_id: "kitchen-dev" },
+        ],
+        states: {
+          "light.kitchen": state("light.kitchen", "unavailable"),
+          "sensor.kitchen_temp": state("sensor.kitchen_temp", "21"),
+        },
+      }),
+      "kitchen",
+    );
+    assert.equal(result, false);
+  });
+
+  it("stays available when the area has no device entities", () => {
+    const helpersOnly = areaUnavailable(
+      hass({
+        entities: [
+          { entity_id: "input_boolean.guest", area_id: "hall" },
+          { entity_id: "input_select.scene", area_id: "hall" },
+          { entity_id: "timer.nap", area_id: "hall" },
+          { entity_id: "sensor.note", area_id: "hall", platform: "template" },
+        ],
+        states: {
+          "input_boolean.guest": state("input_boolean.guest", "unavailable"),
+          "input_select.scene": state("input_select.scene", "unavailable"),
+          "timer.nap": state("timer.nap", "unavailable"),
+          "sensor.note": state("sensor.note", "unavailable"),
+        },
+      }),
+      "hall",
+    );
+    assert.equal(helpersOnly, false);
+    assert.equal(areaUnavailable(hass({}), "empty"), false);
+  });
+
+  it("dims the collapsed button and still lists the area on its floor", () => {
+    const fixture = hass({
+      devices: [{ id: "shed-dev", area_id: "shed" }],
+      entities: [{ entity_id: "light.shed", device_id: "shed-dev" }],
+      states: { "light.shed": state("light.shed", "unavailable") },
+      areas: {
+        shed: { area_id: "shed", name: "Shed", floor_id: "down" },
+        kitchen: { area_id: "kitchen", name: "Kitchen", floor_id: "down" },
+      },
+    });
+    assert.equal(areaUnavailable(fixture, "shed"), true);
+    assert.deepEqual(
+      areasOnFloor(fixture, "down").map((area) => area.areaId),
+      ["kitchen", "shed"],
+    );
+    const button = buildButtonConfig({
+      areaId: "shed",
+      name: "Shed",
+      icon: "mdi:greenhouse",
+      sections: emptySections(),
+      unavailable: true,
+    });
+    const styles = String(button.styles);
+    assert.match(styles, /opacity:\s*0\.5 !important/);
+    assert.match(styles, /cursor:\s*not-allowed/);
+    assert.equal(button.card_type, "button");
+    assert.equal(Array.isArray(button.sub_button), true);
   });
 });

@@ -1,6 +1,8 @@
 # Area Card
 
-A [HACS](https://hacs.xyz/) Lovelace card for one Home Assistant area. Pick the area. The card reads the area name and icon, opens a `#area-<area_id>` popup, and fills that popup from the entities assigned to the area.
+A [HACS](https://hacs.xyz/) Lovelace card for one Home Assistant area. Pick the area. The card reads the area name and icon, opens a `#area-<area_id>` popup, and fills that popup from the entities assigned to the area. The card also reads the area picture and uses it as the background of the button and the popup.
+
+When the area has device entities and every one of them is unavailable, the collapsed button uses the same half-opacity treatment as a Bubble button whose entity is unavailable. The card stays on screen. Input booleans, input selects, timers, and template helpers that are not device entities are ignored. An area with no device entities, or with at least one available device entity, stays at full opacity.
 
 ```yaml
 type: custom:area-card
@@ -29,7 +31,7 @@ On/off lights toggle from the icon; the rest of the row opens more-info. Dimmabl
 
 ## Floor Card
 
-A collapsible floor header. Clicking the header collapses or expands the card. When expanded, one Area Card is shown for each area assigned to the floor, sorted alphabetically.
+A collapsible floor header. Clicking the header collapses or expands the card. When expanded, one Area Card is shown for each area assigned to the floor, sorted alphabetically, including areas whose devices are unavailable.
 
 The header is a section title: the floor name, a rule, and a collapse control. Its icon comes from the floor registry. A floor with no icon shows no icon.
 

@@ -1,4 +1,5 @@
 import { stripRoomName } from "./names";
+import { pictureBackgroundStyles } from "./picture";
 import { rollupLabel, sectionRollups, sectionTitle } from "./rollups";
 import type { AreaSections, EntityState } from "./sections";
 import { areaHash, BUBBLE_CARD_TYPE, mushroomCardType } from "./tags";
@@ -12,8 +13,9 @@ export function buildPopupConfig(
   icon: string,
   sections: AreaSections,
   states: Record<string, EntityState> = {},
+  picture?: string | null,
 ): Record<string, unknown> {
-  return {
+  const config: Record<string, unknown> = {
     type: BUBBLE_CARD_TYPE,
     card_type: "pop-up",
     hash: areaHash(areaId),
@@ -23,6 +25,8 @@ export function buildPopupConfig(
     background_update: true,
     cards: buildPopupCards(sections, states, name),
   };
+  if (picture) config.styles = pictureBackgroundStyles(picture, "popup");
+  return config;
 }
 
 export function buildPopupCards(
