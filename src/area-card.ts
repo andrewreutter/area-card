@@ -1,6 +1,7 @@
+import { syncAutomationSubtitle } from "./automation-subtitle";
 import { loadDisabledAutomations } from "./automations";
 import { buildButtonConfig } from "./button-config";
-import { hideAreaDotTooltip, syncAreaDotTooltips } from "./dot-tooltip";
+import { hideAreaDotTooltip, syncAreaDotTooltips, type DotTooltipSource } from "./dot-tooltip";
 import { ensureDeps } from "./ensure-deps";
 import "./floor-card";
 import "./floors-card";
@@ -52,6 +53,7 @@ class AreaCard extends HTMLElement {
   private running = false;
   private queued = false;
   private dotRollups: SectionRollup[] = [];
+  private dotTooltipSource?: DotTooltipSource;
   private tooltipHost?: HTMLElement;
   private tooltipObserver?: MutationObserver;
   private tooltipFrame = 0;
@@ -61,6 +63,14 @@ class AreaCard extends HTMLElement {
   private editFrame = 0;
   private editTries = 0;
   private editAreaId?: string;
+  private resizeTimer = 0;
+  private lastViewport = 0;
+  private readonly onResize = () => {
+    const width = window.innerWidth;
+    if (width === this.lastViewport) return;
+    window.clearTimeout(this.resizeTimer);
+    this.resizeTimer = window.setTimeout(() => this.schedule(), 150);
+  };
 
   static getConfigForm(): typeof CONFIG_FORM {
     return CONFIG_FORM;
@@ -103,10 +113,13 @@ class AreaCard extends HTMLElement {
 
   connectedCallback(): void {
     this.style.display = "block";
+    window.addEventListener("resize", this.onResize);
     this.schedule();
   }
 
   disconnectedCallback(): void {
+    window.removeEventListener("resize", this.onResize);
+    window.clearTimeout(this.resizeTimer);
     this.stopDotTooltipWatch();
     this.stopAreaEditWatch();
     hideAreaDotTooltip();
@@ -150,6 +163,15 @@ class AreaCard extends HTMLElement {
     const states = hass.states ?? {};
     this.dotRollups = sectionRollups(visibleSections, states, disabled);
     const formatEntityState = hass.formatEntityState;
+    const formatState = typeof formatEntityState === "function" ? formatEntityState.bind(hass) : undefined;
+    this.dotTooltipSource = {
+      sections: visibleSections,
+      states,
+      roomName: name,
+      formatEntityState: formatState,
+    };
+    const viewportWidth = window.innerWidth;
+    this.lastViewport = viewportWidth;
     const buttonConfig = buildButtonConfig({
       areaId,
       name,
@@ -161,9 +183,12 @@ class AreaCard extends HTMLElement {
       unavailable,
       disabledAutomations: disabled,
       alignDots: !!this.closest("floor-card"),
-      formatEntityState: typeof formatEntityState === "function" ? formatEntityState.bind(hass) : undefined,
+      formatEntityState: formatState,
     });
-    const popupConfig = buildPopupConfig(areaId, name, icon, visibleSections, states, picture, disabled);
+    const popupConfig = buildPopupConfig(areaId, name, icon, visibleSections, states, picture, disabled, {
+      viewportWidth,
+      formatEntityState: formatState,
+    });
     const buttonKey = JSON.stringify(buttonConfig);
     const popupKey = JSON.stringify(popupConfig);
 
@@ -242,7 +267,8 @@ class AreaCard extends HTMLElement {
   private applyDotTooltips(): void {
     const root = this.buttonEl?.shadowRoot;
     if (!root) return;
-    syncAreaDotTooltips(root, this.dotRollups);
+    syncAreaDotTooltips(root, this.dotRollups, this.dotTooltipSource);
+    syncAutomationSubtitle(root);
   }
 
   private stopAreaEditWatch(): void {

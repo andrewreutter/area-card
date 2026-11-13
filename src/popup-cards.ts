@@ -1,11 +1,25 @@
 import { stripRoomName } from "./names";
 import { pictureBackgroundStyles } from "./picture";
 import { popupChromeStyles } from "./popup-chrome";
+import { readViewportWidth, rowColumns, type LineMeasure } from "./row-width";
 import { rollupLabel, sectionColor, sectionIcon, sectionRollups, sectionTitle, type RollupId } from "./rollups";
 import type { AreaSections, EntityState } from "./sections";
 import { areaHash, BUBBLE_CARD_TYPE, mushroomCardType } from "./tags";
 
 const FULL = { columns: 12 };
+const UNAVAILABLE = "Unavailable";
+
+export interface PopupLayout {
+  viewportWidth?: number;
+  measure?: LineMeasure;
+  formatEntityState?: (state: EntityState, sample?: string) => string;
+}
+
+interface RowLayout {
+  viewportWidth: number;
+  measure?: LineMeasure;
+  formatEntityState?: PopupLayout["formatEntityState"];
+}
 const LIGHT_ROW = "custom:area-card-light-row";
 const SECTION_TITLE = "custom:area-card-section-title";
 const STATUS_HEADING = {
@@ -22,6 +36,7 @@ export function buildPopupConfig(
   states: Record<string, EntityState> = {},
   picture?: string | null,
   disabledAutomations: ReadonlySet<string> = new Set(),
+  layout?: PopupLayout,
 ): Record<string, unknown> {
   const config: Record<string, unknown> = {
     type: BUBBLE_CARD_TYPE,
@@ -31,7 +46,7 @@ export function buildPopupConfig(
     icon,
     bg_blur: 15,
     background_update: true,
-    cards: buildPopupCards(sections, states, name, disabledAutomations),
+    cards: buildPopupCards(sections, states, name, disabledAutomations, layout),
   };
   config.styles = popupChromeStyles(picture ? pictureBackgroundStyles(picture, "popup") : undefined);
   return config;
@@ -42,7 +57,9 @@ export function buildPopupCards(
   states: Record<string, EntityState> = {},
   roomName = "",
   disabledAutomations: ReadonlySet<string> = new Set(),
+  layout?: PopupLayout,
 ): Record<string, unknown>[] {
+  const rows = resolveLayout(layout);
   const cards: Record<string, unknown>[] = [];
   const add = (id: RollupId | "status", body: Record<string, unknown>[]) => {
     if (body.length === 0) return;
@@ -74,12 +91,14 @@ export function buildPopupCards(
 
   add(
     "climate",
-    sections.climate.map((entity) => entityCard(entity, states, roomName)),
+    sections.climate.map((entity) => entityCard(entity, states, roomName, rows)),
   );
 
   add(
     "lights",
-    sections.lights.map((entity) => withLedDot(lightCard(entity, states[entity], states, roomName), sections.lightLeds[entity])),
+    sections.lights.map((entity) =>
+      withLedDot(lightCard(entity, states[entity], states, roomName, rows, Boolean(sections.lightLeds[entity])), sections.lightLeds[entity]),
+    ),
   );
 
   add(
@@ -101,7 +120,7 @@ export function buildPopupCards(
   add(
     "switches",
     sections.switches.map((entity) =>
-      entityCard(entity, states, roomName, {
+      entityCard(entity, states, roomName, rows, {
         tap_action: { action: "toggle" },
         hold_action: { action: "more-info" },
       }),
@@ -110,7 +129,7 @@ export function buildPopupCards(
 
   add(
     "occupancy",
-    sections.occupancy.map((item) => occupancyCard(item.entityId, states, roomName, item.pressureEntityId)),
+    sections.occupancy.map((item) => occupancyCard(item.entityId, states, roomName, rows, item.pressureEntityId)),
   );
 
   add(
@@ -123,19 +142,21 @@ export function buildPopupCards(
               entity,
               show_position_control: true,
               show_buttons_control: true,
-              grid_options: FULL,
+              grid_options: gridFor(rows, entityTitle(entity, states, roomName), entitySecondaries(states[entity], rows)),
             },
             entity,
             states,
             roomName,
           )
-        : entityCard(entity, states, roomName),
+        : entityCard(entity, states, roomName, rows),
     ),
   );
 
   add(
     "satellites",
-    sections.satellites.map((item) => satelliteCard(item.entityId, states, roomName, item.ledEntityId, item.alarmEntityId)),
+    sections.satellites.map((item) =>
+      satelliteCard(item.entityId, states, roomName, rows, item.ledEntityId, item.alarmEntityId),
+    ),
   );
 
   const helperCards = [
@@ -144,20 +165,22 @@ export function buildPopupCards(
         {
           type: mushroomCardType("select-card"),
           entity,
-          grid_options: FULL,
+          grid_options: gridFor(rows, entityTitle(entity, states, roomName), selectSecondaries(states[entity], rows)),
         },
         entity,
         states,
         roomName,
       ),
     ),
-    ...sections.helpers.map((entity) => entityCard(entity, states, roomName)),
+    ...sections.helpers.map((entity) => entityCard(entity, states, roomName, rows)),
   ];
   add("helpers", helperCards);
 
   add(
     "automations",
-    sections.automations.map((entity) => automationCard(entity, states, roomName, disabledAutomations.has(entity))),
+    sections.automations.map((entity) =>
+      automationCard(entity, states, roomName, rows, disabledAutomations.has(entity)),
+    ),
   );
 
   return cards;
@@ -186,7 +209,10 @@ function lightCard(
   state: EntityState | undefined,
   states: Record<string, EntityState>,
   roomName: string,
+  layout: RowLayout,
+  led = false,
 ): Record<string, unknown> {
+  const title = entityTitle(entity, states, roomName);
   if (lightExposesControls(state)) {
     return named(
       {
@@ -197,7 +223,7 @@ function lightCard(
         show_color_temp_control: true,
         show_color_control: true,
         collapsible_controls: true,
-        grid_options: FULL,
+        grid_options: gridFor(layout, title, entitySecondaries(state, layout), led),
       },
       entity,
       states,
@@ -206,11 +232,12 @@ function lightCard(
   }
   // The light card binds one action to the whole row. The template card splits
   // icon tap from the rest of the row and still renders a Mushroom row.
+  // Its secondary is the raw state title, so "Unavailable" is the longest line.
   return {
     type: mushroomCardType("template-card"),
     entity,
     entity_id: entity,
-    primary: entityTitle(entity, states, roomName),
+    primary: title,
     secondary: `{{ states('${entity}') | title }}`,
     icon: `{{ state_attr('${entity}', 'icon') or 'mdi:lightbulb' }}`,
     icon_color: `{{ 'amber' if is_state('${entity}', 'on') else 'grey' }}`,
@@ -224,7 +251,7 @@ function lightCard(
     },
     icon_hold_action: { action: "more-info" },
     icon_double_tap_action: { action: "none" },
-    grid_options: FULL,
+    grid_options: gridFor(layout, title, [UNAVAILABLE], led),
   };
 }
 
@@ -234,7 +261,7 @@ function withLedDot(card: Record<string, unknown>, ledEntityId?: string): Record
     type: LIGHT_ROW,
     led_entity: ledEntityId,
     card,
-    grid_options: FULL,
+    grid_options: card.grid_options ?? FULL,
   };
 }
 
@@ -255,14 +282,15 @@ function entityCard(
   entity: string,
   states: Record<string, EntityState>,
   roomName: string,
+  layout: RowLayout,
   extra: Record<string, unknown> = {},
 ): Record<string, unknown> {
   return named(
     {
       type: mushroomCardType("entity-card"),
       entity,
-      grid_options: FULL,
       ...extra,
+      grid_options: gridFor(layout, entityTitle(entity, states, roomName), entitySecondaries(states[entity], layout)),
     },
     entity,
     states,
@@ -274,21 +302,23 @@ function occupancyCard(
   entity: string,
   states: Record<string, EntityState>,
   roomName: string,
+  layout: RowLayout,
   pressureId?: string,
 ): Record<string, unknown> {
+  const title = entityTitle(entity, states, roomName);
   const pressure = pressureId
     ? `{% set p = '${pressureId}' %}{% if states(p) not in ['unknown', 'unavailable', 'none', ''] %} · {{ states(p) }}{% set unit = state_attr(p, 'unit_of_measurement') %}{% if unit %} {{ unit }}{% endif %}{% endif %}`
     : "";
   return {
     type: mushroomCardType("template-card"),
     entity,
-    primary: entityTitle(entity, states, roomName),
+    primary: title,
     secondary: `{{ states('${entity}') | title }}${pressure}`,
     icon: `{{ state_attr('${entity}', 'icon') or 'mdi:motion-sensor' }}`,
     icon_color: `{{ 'amber' if is_state('${entity}', 'on') else 'grey' }}`,
     tap_action: { action: "more-info" },
     hold_action: { action: "none" },
-    grid_options: FULL,
+    grid_options: gridFor(layout, title, occupancySecondaries(pressureId ? states[pressureId] : undefined)),
   };
 }
 
@@ -296,6 +326,7 @@ function satelliteCard(
   entity: string,
   states: Record<string, EntityState>,
   roomName: string,
+  layout: RowLayout,
   ledId?: string,
   alarmId?: string,
 ): Record<string, unknown> {
@@ -312,7 +343,7 @@ function satelliteCard(
     icon_color: `{{ 'blue' if is_state('${entity}', 'idle') else 'green' }}`,
     tap_action: { action: "more-info" },
     hold_action: { action: "none" },
-    grid_options: FULL,
+    grid_options: gridFor(layout, entityTitle(entity, states, roomName), satelliteSecondaries(Boolean(ledId), Boolean(alarmId))),
   };
   if (ledId) {
     card.badge_icon = `{{ 'mdi:led-on' if is_state('${ledId}', 'on') else 'mdi:led-off' }}`;
@@ -325,6 +356,7 @@ function automationCard(
   entity: string,
   states: Record<string, EntityState>,
   roomName: string,
+  layout: RowLayout,
   disabled = false,
 ): Record<string, unknown> {
   return {
@@ -343,7 +375,7 @@ function automationCard(
       target: { entity_id: entity },
     },
     double_tap_action: { action: "none" },
-    grid_options: FULL,
+    grid_options: gridFor(layout, entityTitle(entity, states, roomName), [disabled ? "Disabled" : "Never triggered"]),
   };
 }
 
@@ -364,4 +396,100 @@ export function entityTitle(entity: string, states: Record<string, EntityState>,
     return `{{ state_attr('${entity}', 'friendly_name') }}`;
   }
   return stripRoomName(raw, roomName);
+}
+
+function resolveLayout(layout?: PopupLayout): RowLayout {
+  const viewportWidth = layout?.viewportWidth && layout.viewportWidth > 0 ? layout.viewportWidth : readViewportWidth();
+  return {
+    viewportWidth,
+    measure: layout?.measure,
+    formatEntityState: layout?.formatEntityState,
+  };
+}
+
+function gridFor(
+  layout: RowLayout,
+  primary: string,
+  secondaries: readonly string[],
+  led = false,
+): { columns: number } {
+  return rowColumns(primary, secondaries, layout.viewportWidth, { led, measure: layout.measure });
+}
+
+function entitySecondaries(state: EntityState | undefined, layout: RowLayout): string[] {
+  const lines = [displayedState(state, "unavailable", layout)];
+  const current = currentStateLine(state, layout);
+  if (current) lines.push(current);
+  return lines;
+}
+
+function selectSecondaries(state: EntityState | undefined, layout: RowLayout): string[] {
+  const lines = entitySecondaries(state, layout);
+  const options = state?.attributes?.options;
+  if (!Array.isArray(options)) return lines;
+  for (const option of options) {
+    if (typeof option === "string" && option.trim() !== "") lines.push(option);
+  }
+  return lines;
+}
+
+function occupancySecondaries(pressure: EntityState | undefined): string[] {
+  if (!pressure) return [UNAVAILABLE];
+  const raw = pressure.state;
+  if (!raw || raw === "unknown" || raw === "unavailable" || raw === "none") return [UNAVAILABLE];
+  const unit = pressure.attributes?.unit_of_measurement;
+  const value = widenNumericText(raw);
+  const suffix = typeof unit === "string" && unit !== "" ? `${value} ${unit}` : value;
+  return [UNAVAILABLE, `${UNAVAILABLE} · ${suffix}`];
+}
+
+function satelliteSecondaries(led: boolean, alarm: boolean): string[] {
+  const parts = [UNAVAILABLE];
+  if (led) parts.push("LED: Unavailable");
+  if (alarm) parts.push("Alarm: Off");
+  return [parts.join(" · ")];
+}
+
+function displayedState(state: EntityState | undefined, sample: string, layout: RowLayout): string {
+  const format = layout.formatEntityState;
+  if (format && state) {
+    try {
+      const text = format(state, sample);
+      if (typeof text === "string" && text.trim() !== "") return text.trim();
+    } catch {
+      // Fall through to the English word the card shows when formatting is unavailable.
+    }
+  }
+  return sample === "unavailable" ? UNAVAILABLE : sample;
+}
+
+function currentStateLine(state: EntityState | undefined, layout: RowLayout): string | undefined {
+  if (!state) return undefined;
+  const format = layout.formatEntityState;
+  if (format) {
+    try {
+      const text = format(state);
+      if (typeof text === "string" && text.trim() !== "") return widenNumericText(text.trim());
+    } catch {
+      // Use the raw state below.
+    }
+  }
+  return widenNumericText(rawWithUnit(state));
+}
+
+function rawWithUnit(state: EntityState): string {
+  const unit = state.attributes?.unit_of_measurement;
+  const raw = state.state ?? "";
+  if (typeof unit === "string" && unit !== "" && raw !== "unknown" && raw !== "unavailable" && raw !== "") {
+    return `${raw} ${unit}`;
+  }
+  return raw;
+}
+
+/** One extra digit, so a value that grows from 9.9 to 10.0 still fits. */
+function widenNumericText(value: string): string {
+  return value.replace(/-?\d+(?:\.\d+)?/, (match) => {
+    const sign = match.startsWith("-") ? "-" : "";
+    return `${sign}0${match.slice(sign.length)}`;
+  });
 }

@@ -18,9 +18,9 @@ export function emptyRollupDotClass(id: RollupId): string {
   return `area-dot-${id}-empty`;
 }
 
-/** Collapsed button and floor-header dots. Climate is a subtitle, not a column. */
+/** Collapsed button and floor-header dots. Climate and automations are subtitles, not columns. */
 export function collapsedDotSlots(hide: readonly RollupId[]): RollupId[] {
-  return ROLLUP_ORDER.filter((id) => id !== "climate" && !hide.includes(id));
+  return ROLLUP_ORDER.filter((id) => id !== "climate" && id !== "automations" && !hide.includes(id));
 }
 
 export interface SectionRollup {
@@ -181,22 +181,55 @@ export function rollupLabel(rollup: SectionRollup): string {
     const off = rollup.off ?? Math.max(0, rollup.total - rollup.active - disabled);
     const ready = rollup.active + off;
     // Disabled automations stay out of the fraction. With none on or off, skip 0/0.
-    if (ready === 0) return `${rollup.title} ${disabled}, disabled`;
-    return `${rollup.title} ${rollup.active}/${ready} on, ${disabled}, disabled`;
+    if (ready === 0) return `${rollup.title} ${disabled} disabled`;
+    return `${rollup.title} ${rollup.active}/${ready} on, ${disabled} disabled`;
   }
   return `${rollup.title} ${rollup.active}/${rollup.total} ${rollup.word}`;
 }
 
 const DOT_CLASS = /(?:^|\s)area-dot-([a-z]+)-(on|off|empty)(?:\s|$)/;
 
-/** Status-chip text for a visible dot. Empty slots have no tooltip. */
-export function dotTooltipLabel(className: string, rollups: readonly SectionRollup[]): string | null {
+/** Rollup id for a visible dot. Empty slots have no tooltip. */
+export function visibleDotRollupId(className: string): RollupId | null {
   const match = DOT_CLASS.exec(className);
   if (!match || match[2] === "empty") return null;
-  const id = match[1];
-  if (!isRollupId(id)) return null;
+  return isRollupId(match[1]) ? match[1] : null;
+}
+
+/** Status-chip text for a visible dot. Empty slots have no tooltip. */
+export function dotTooltipLabel(className: string, rollups: readonly SectionRollup[]): string | null {
+  const id = visibleDotRollupId(className);
+  if (!id) return null;
   const rollup = rollups.find((item) => item.id === id);
   return rollup ? rollupLabel(rollup) : null;
+}
+
+/**
+ * Entity ids that feed a rollup, in section order.
+ * The same set the summary counts: the denominator, not only the active ones.
+ * Helpers and climate keep only on/off entities. Selects and timers stay out.
+ */
+export function rollupEntityIds(id: RollupId, sections: AreaSections): string[] {
+  switch (id) {
+    case "climate":
+      return sections.climate.filter(isOnOffEntity);
+    case "lights":
+      return sections.lights.slice();
+    case "media":
+      return sections.mediaPlayers.slice();
+    case "switches":
+      return sections.switches.slice();
+    case "occupancy":
+      return sections.occupancy.map((item) => item.entityId);
+    case "openings":
+      return sections.openings.slice();
+    case "satellites":
+      return sections.satellites.map((item) => item.entityId);
+    case "helpers":
+      return sections.helpers.filter(isOnOffEntity);
+    case "automations":
+      return sections.automations.slice();
+  }
 }
 
 function isRollupId(value: string): value is RollupId {

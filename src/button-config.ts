@@ -1,3 +1,4 @@
+import { automationStateText } from "./automation-subtitle";
 import { climateSubtitle } from "./climate-subtitle";
 import { pictureBackgroundStyles } from "./picture";
 import { emptyRollupDotClass, FLOOR_CHEVRON_PX, ROLLUP_ORDER, rollupDotClass, rollupDotStyles, sectionIcon, sectionRollups, type RollupId } from "./rollups";
@@ -36,8 +37,8 @@ const UNAVAILABLE_BUTTON_STYLES = [
 ].join("\n");
 
 /**
- * Ellipsis on the climate subtitle. display has no !important so Bubble's
- * `.hidden { display: none !important }` still hides an empty state line.
+ * Ellipsis on the subtitle under the room name. display has no !important so
+ * Bubble's `.hidden { display: none !important }` still hides an empty state line.
  */
 const STATE_LINE_STYLES = [
   ".bubble-name-container > .bubble-state {",
@@ -47,6 +48,16 @@ const STATE_LINE_STYLES = [
   "  overflow: hidden;",
   "  text-overflow: ellipsis;",
   "  white-space: nowrap;",
+  "}",
+  ".bubble-name-container > .bubble-state > ha-icon.area-card-automation-icon {",
+  "  display: inline-block;",
+  "  width: 12px;",
+  "  height: 12px;",
+  "  vertical-align: -2px;",
+  "  --mdc-icon-size: 12px;",
+  "}",
+  ".bubble-name-container > .bubble-state > s.area-card-automation-disabled {",
+  "  text-decoration: line-through;",
   "}",
 ].join("\n");
 
@@ -100,13 +111,18 @@ export function buildButtonConfig(input: ButtonConfigInput): Record<string, unkn
     sub_button: subButtons,
     styles: buttonStyles(rollups, input.picture, input.unavailable, input.alignDots),
   };
-  const subtitle = climateSubtitle(
+  const climate = climateSubtitle(
     input.sections.climate,
     input.states ?? {},
     input.name,
     input.formatEntityState,
   );
+  const automation = rollups.find((rollup) => rollup.id === "automations");
+  const automationText = automation ? automationStateText(automation) : "";
+  const subtitle = [climate, automationText].filter((part) => part !== "").join(" · ");
   if (subtitle) config.state_content = `{{ ${JSON.stringify(subtitle)} }}`;
+  // The marquee rewrite replaces .bubble-state and would drop the icon. Ellipsis stays on the line.
+  if (automationText) config.scrolling_effect = false;
   return config;
 }
 
