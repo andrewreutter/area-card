@@ -1,10 +1,13 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { buildButtonConfig } from "../src/button-config";
+import { stripRoomName } from "../src/names";
 import { buildPopupCards, buildPopupConfig } from "../src/popup-cards";
+import { sectionRollups } from "../src/rollups";
 import {
   classifyArea,
   emptySections,
+  type AreaSections,
   type ClassifierHass,
   type DeviceEntry,
   type EntityState,
@@ -117,7 +120,7 @@ describe("classifyArea", () => {
     assert.deepEqual(result.occupancy, [
       { entityId: "binary_sensor.office_chair", pressureEntityId: "sensor.office_chair_pressure" },
     ]);
-    assert.deepEqual(result.status, ["sensor.office_humidity", "sensor.office_temperature"]);
+    assert.deepEqual(result.climate, ["sensor.office_humidity", "sensor.office_temperature"]);
   });
 
   it("uses the device area when the entity area is unset, and the entity area when both are set", () => {
@@ -150,7 +153,7 @@ describe("classifyArea", () => {
     assert.deepEqual(bedroom.lights, ["light.reading_lamp"]);
   });
 
-  it("reads device class from state attributes and keeps other binary sensors as status", () => {
+  it("reads device class from state attributes and drops other binary sensors from the sections", () => {
     const result = classifyArea(
       hass({
         entities: [
@@ -174,7 +177,8 @@ describe("classifyArea", () => {
     );
     assert.deepEqual(result.occupancy.map((item) => item.entityId), ["binary_sensor.motion"]);
     assert.deepEqual(result.openings, ["binary_sensor.door", "cover.shade"]);
-    assert.deepEqual(result.status, ["binary_sensor.helpmeet_something"]);
+    assert.equal(listedIds(result).includes("binary_sensor.helpmeet_something"), false);
+    assert.deepEqual(result.climate, []);
   });
 
   it("sends LED switches and template entities to helpers, and leaves circadian lights as lights", () => {
@@ -197,7 +201,8 @@ describe("classifyArea", () => {
     );
     assert.deepEqual(result.lights, ["light.circadian_lamps"]);
     assert.deepEqual(result.switches, ["switch.desk_plug"]);
-    assert.deepEqual(result.helpers, ["input_boolean.guest", "light.template_lamp", "switch.desk_led", "timer.nap"]);
+    assert.deepEqual(result.helpers, ["input_boolean.guest", "light.template_lamp", "timer.nap"]);
+    assert.equal(listedIds(result).includes("switch.desk_led"), false);
     assert.deepEqual(result.selects, ["input_select.scene"]);
   });
 
@@ -248,7 +253,7 @@ describe("classifyArea", () => {
         pressureEntityId: "sensor.bedroom_bed_pressure_sensor_pressure",
       },
     ]);
-    assert.deepEqual(result.status, []);
+    assert.deepEqual(result.climate, []);
     assert.deepEqual(result.selects, []);
     assert.deepEqual(result.helpers, []);
   });
@@ -313,7 +318,10 @@ describe("popup and button configs", () => {
       },
     );
     const titles = cards.filter((card) => card.title).map((card) => card.title);
-    assert.deepEqual(titles, ["Lights", "Occupancy"]);
+    assert.deepEqual(titles, ["Status", "Lights", "Occupancy"]);
+    const chips = cards.find((card) => String(card.type).endsWith("chips-card"));
+    const contents = (chips?.chips as Array<{ content: string }>).map((chip) => chip.content);
+    assert.deepEqual(contents, ["Lights 2/2 On", "Occupancy 0/1 On"]);
     assert.equal(cards.some((card) => JSON.stringify(card).includes("sensor.bed_pressure") && card.type?.toString().includes("entity-card")), false);
     const types = cards.map((card) => String(card.type));
     assert.ok(types.every((type) => type.startsWith("custom:area-card-mushroom-")));
@@ -371,32 +379,319 @@ describe("popup and button configs", () => {
     }
   });
 
-  it("hides the lights sub-button when no lights remain and toggles the whole set", () => {
-    const withLights = buildButtonConfig({
+  it("draws one collapsed dot per rollup and does not toggle from the dot", () => {
+    const lights = ["light.a", "light.b", "light.c", "light.d"];
+    const sections = { ...emptySections(), lights };
+    const offStates = Object.fromEntries(lights.map((id) => [id, state(id, "off")]));
+    const onStates = { ...offStates, "light.a": state("light.a", "on") };
+
+    const inactive = buildButtonConfig({
       areaId: "bedroom",
       name: "Master Bedroom",
       icon: "mdi:bed",
-      sections: { ...emptySections(), lights: ["light.reading_lamp", "light.under_bed"] },
-      lightRepresentative: "light.reading_lamp",
-      occupancyRepresentative: "binary_sensor.bed",
+      sections,
+      states: offStates,
     });
-    const sub = withLights.sub_button as Array<Record<string, unknown>>;
-    assert.equal(sub.length, 2);
-    assert.equal(sub[0]?.icon, "mdi:account");
-    const lightTap = sub[1]?.tap_action as { target: { entity_id: string[] } };
-    assert.deepEqual(lightTap.target.entity_id, ["light.reading_lamp", "light.under_bed"]);
-    assert.equal(sub[1]?.entity, "light.reading_lamp");
-    assert.equal((withLights.button_action as { tap_action: { navigation_path: string } }).tap_action.navigation_path, "#area-bedroom");
+    const active = buildButtonConfig({
+      areaId: "bedroom",
+      name: "Master Bedroom",
+      icon: "mdi:bed",
+      sections,
+      states: onStates,
+    });
+    const offDots = inactive.sub_button as Array<Record<string, unknown>>;
+    const onDots = active.sub_button as Array<Record<string, unknown>>;
+    assert.deepEqual(offDots.map((dot) => dot.css_class), ["area-dot-lights-off"]);
+    assert.deepEqual(onDots.map((dot) => dot.css_class), ["area-dot-lights-on"]);
+    assert.equal(String(inactive.styles).includes("transparent"), true);
+    assert.equal(String(active.styles).includes("rgb(255, 193, 7)"), true);
+    assert.equal(JSON.stringify(onDots).includes("light.toggle"), false);
+    assert.equal(JSON.stringify(onDots).includes("perform-action"), false);
+    const tap = onDots[0]?.tap_action as { navigation_path: string };
+    assert.equal(tap.navigation_path, "#area-bedroom");
+    assert.equal(active.name, "Master Bedroom");
+    assert.equal(JSON.stringify(active).includes("custom:bubble-card"), false);
+    assert.equal(String(active.type), "custom:area-card-bubble");
+  });
+});
 
-    const noLights = buildButtonConfig({
+function listedIds(sections: AreaSections): string[] {
+  return [
+    ...sections.climate,
+    ...sections.lights,
+    ...Object.values(sections.lightLeds),
+    ...sections.mediaPlayers,
+    ...sections.switches,
+    ...sections.occupancy.map((item) => item.entityId),
+    ...sections.openings,
+    ...sections.satellites.flatMap((item) => [item.entityId, item.ledEntityId, item.alarmEntityId].filter(Boolean) as string[]),
+    ...sections.helpers,
+    ...sections.selects,
+    ...sections.automations,
+  ];
+}
+
+describe("satellite scope", () => {
+  it("keeps satellite entities off every other section and puts alarm on the kiosk card", () => {
+    const result = classifyArea(
+      hass({
+        devices: [
+          { id: "updoot", area_id: "office_of_drew", manufacturer: "kiosk_satellite" },
+          { id: "plain", area_id: "office_of_drew", manufacturer: "Espressif" },
+        ],
+        entities: [
+          { entity_id: "assist_satellite.updoot", device_id: "updoot" },
+          { entity_id: "binary_sensor.updoot_alarm_ringing", device_id: "updoot" },
+          { entity_id: "light.updoot_led_control_idle", device_id: "updoot" },
+          { entity_id: "button.updoot_stop_alarm", device_id: "updoot" },
+          { entity_id: "switch.updoot_relay", device_id: "updoot" },
+          { entity_id: "sensor.updoot_cpu_temperature", device_id: "updoot", entity_category: "diagnostic" },
+          { entity_id: "sensor.updoot_ambient_light", device_id: "updoot" },
+          { entity_id: "assist_satellite.plain", device_id: "plain" },
+          { entity_id: "binary_sensor.plain_alarm_ringing", device_id: "plain" },
+          { entity_id: "light.desk_lamp", area_id: "office_of_drew" },
+          { entity_id: "binary_sensor.door", area_id: "office_of_drew" },
+        ],
+        states: {
+          "binary_sensor.updoot_alarm_ringing": state("binary_sensor.updoot_alarm_ringing", "off", {
+            friendly_name: "Updoot1 Alarm ringing",
+          }),
+          "binary_sensor.plain_alarm_ringing": state("binary_sensor.plain_alarm_ringing", "on", {
+            friendly_name: "Alarm ringing",
+          }),
+          "sensor.updoot_cpu_temperature": state("sensor.updoot_cpu_temperature", "40", { device_class: "temperature" }),
+          "binary_sensor.door": state("binary_sensor.door", "off", { device_class: "door" }),
+          "light.updoot_led_control_idle": state("light.updoot_led_control_idle", "on"),
+        },
+      }),
+      "office_of_drew",
+    );
+
+    assert.deepEqual(result.satellites, [
+      {
+        entityId: "assist_satellite.plain",
+        alarmEntityId: "binary_sensor.plain_alarm_ringing",
+      },
+      {
+        entityId: "assist_satellite.updoot",
+        ledEntityId: "light.updoot_led_control_idle",
+        alarmEntityId: "binary_sensor.updoot_alarm_ringing",
+      },
+    ]);
+    assert.deepEqual(result.lights, ["light.desk_lamp"]);
+    assert.deepEqual(result.openings, ["binary_sensor.door"]);
+    assert.deepEqual(result.climate, []);
+    for (const leaked of [
+      "binary_sensor.updoot_alarm_ringing",
+      "binary_sensor.plain_alarm_ringing",
+      "light.updoot_led_control_idle",
+      "button.updoot_stop_alarm",
+      "switch.updoot_relay",
+      "sensor.updoot_cpu_temperature",
+      "sensor.updoot_ambient_light",
+    ]) {
+      assert.equal(result.helpers.includes(leaked), false, leaked);
+      assert.equal(result.switches.includes(leaked), false, leaked);
+      assert.equal(result.lights.includes(leaked), false, leaked);
+      assert.equal(result.openings.includes(leaked), false, leaked);
+      assert.equal(result.climate.includes(leaked), false, leaked);
+    }
+
+    const cards = buildPopupCards(result, {
+      "assist_satellite.updoot": state("assist_satellite.updoot", "idle", { friendly_name: "Updoot1 Assist satellite" }),
+      "binary_sensor.updoot_alarm_ringing": state("binary_sensor.updoot_alarm_ringing", "off", {
+        friendly_name: "Updoot1 Alarm ringing",
+      }),
+      "light.updoot_led_control_idle": state("light.updoot_led_control_idle", "on"),
+    });
+    const kiosk = cards.find((card) => card.entity === "assist_satellite.updoot");
+    assert.equal(String(kiosk?.secondary).includes("Alarm:"), true);
+    assert.equal(String(kiosk?.secondary).includes("light.updoot_led_control_idle"), true);
+    assert.equal(kiosk?.primary, "Updoot1 Assist satellite");
+    assert.equal(cards.some((card) => card.entity === "binary_sensor.updoot_alarm_ringing"), false);
+  });
+});
+
+describe("section rollups", () => {
+  it("counts 1 of 4 lights on and 1 of 4 openings open", () => {
+    const lights = ["light.a", "light.b", "light.c", "light.d"];
+    const openings = ["binary_sensor.d1", "binary_sensor.d2", "binary_sensor.d3", "binary_sensor.d4"];
+    const sections = { ...emptySections(), lights, openings };
+    const states = {
+      "light.a": state("light.a", "on"),
+      "light.b": state("light.b", "off"),
+      "light.c": state("light.c", "off"),
+      "light.d": state("light.d", "off"),
+      "binary_sensor.d1": state("binary_sensor.d1", "on"),
+      "binary_sensor.d2": state("binary_sensor.d2", "off"),
+      "binary_sensor.d3": state("binary_sensor.d3", "off"),
+      "binary_sensor.d4": state("binary_sensor.d4", "off"),
+    };
+    const rollups = sectionRollups(sections, states);
+    assert.deepEqual(
+      rollups.map((rollup) => `${rollup.title} ${rollup.active}/${rollup.total} ${rollup.word}`),
+      ["Lights 1/4 On", "Doors and windows 1/4 Open"],
+    );
+
+    const openingCover = sectionRollups(
+      { ...emptySections(), openings: ["cover.shade"] },
+      { "cover.shade": state("cover.shade", "opening") },
+    );
+    assert.equal(openingCover[0]?.active, 1);
+    const closedCover = sectionRollups(
+      { ...emptySections(), openings: ["cover.shade"] },
+      { "cover.shade": state("cover.shade", "closed") },
+    );
+    assert.equal(closedCover[0]?.active, 0);
+  });
+
+  it("counts helper binaries and ignores input_select and timers", () => {
+    const sections = {
+      ...emptySections(),
+      helpers: ["input_boolean.guest", "input_boolean.away", "timer.nap", "binary_sensor.template_flag"],
+      selects: ["input_select.scene"],
+    };
+    const states = {
+      "input_boolean.guest": state("input_boolean.guest", "on"),
+      "input_boolean.away": state("input_boolean.away", "off"),
+      "timer.nap": state("timer.nap", "active"),
+      "binary_sensor.template_flag": state("binary_sensor.template_flag", "off"),
+      "input_select.scene": state("input_select.scene", "movie"),
+    };
+    const rollups = sectionRollups(sections, states);
+    assert.deepEqual(
+      rollups.map((rollup) => `${rollup.title} ${rollup.active}/${rollup.total} ${rollup.word}`),
+      ["Helpers 1/3 On"],
+    );
+
+    const selectsOnly = sectionRollups(
+      { ...emptySections(), selects: ["input_select.scene"], helpers: ["timer.nap"] },
+      states,
+    );
+    assert.deepEqual(selectsOnly, []);
+    const cards = buildPopupCards(
+      { ...emptySections(), selects: ["input_select.scene"], helpers: ["timer.nap"] },
+      states,
+    );
+    assert.deepEqual(
+      cards.filter((card) => card.title).map((card) => card.title),
+      ["Helpers"],
+    );
+  });
+
+  it("omits a climate chip for numeric sensors and still shows the cards", () => {
+    const sections = {
+      ...emptySections(),
+      climate: ["sensor.temp"],
+      lights: ["light.desk"],
+    };
+    const states = {
+      "sensor.temp": state("sensor.temp", "21", { device_class: "temperature", friendly_name: "Man Cave Temperature" }),
+      "light.desk": state("light.desk", "off", { friendly_name: "Desk" }),
+    };
+    assert.deepEqual(
+      sectionRollups(sections, states).map((rollup) => rollup.id),
+      ["lights"],
+    );
+    const cards = buildPopupCards(sections, states, "Man Cave");
+    assert.deepEqual(
+      cards.filter((card) => card.title).map((card) => card.title),
+      ["Status", "Climate", "Lights"],
+    );
+    const climate = cards.find((card) => card.entity === "sensor.temp");
+    assert.equal(climate?.name, "Temperature");
+  });
+});
+
+describe("light LED dot", () => {
+  it("puts a same-device LED switch on the light card and not in helpers", () => {
+    const desk = "light.man_cave_desk_lamp";
+    const led = "switch.man_cave_desk_lamp_led";
+    const result = classifyArea(
+      hass({
+        devices: [{ id: "desk", area_id: "office_of_drew" }],
+        entities: [
+          { entity_id: desk, device_id: "desk" },
+          { entity_id: led, device_id: "desk", entity_category: "config" },
+          { entity_id: "switch.orphan_led", area_id: "office_of_drew" },
+        ],
+        states: {
+          [desk]: state(desk, "off", { friendly_name: "Man Cave Desk Lamp", supported_color_modes: ["onoff"] }),
+          [led]: state(led, "on", { friendly_name: "Man Cave Desk Lamp LED" }),
+          "switch.orphan_led": state("switch.orphan_led", "on"),
+        },
+      }),
+      "office_of_drew",
+    );
+    assert.deepEqual(result.lights, [desk]);
+    assert.deepEqual(result.lightLeds, { [desk]: led });
+    assert.deepEqual(result.helpers, []);
+    assert.deepEqual(result.switches, []);
+
+    const cards = buildPopupCards(result, {
+      [desk]: state(desk, "off", { friendly_name: "Man Cave Desk Lamp", supported_color_modes: ["onoff"] }),
+      [led]: state(led, "on"),
+    }, "Man Cave");
+    const row = cards.find((card) => card.led_entity === led);
+    const inner = row?.card as Record<string, unknown>;
+    assert.equal(row?.type, "custom:area-card-light-row");
+    assert.equal(inner?.type, "custom:area-card-mushroom-template-card");
+    assert.equal(inner?.primary, "Desk Lamp");
+    assert.deepEqual(inner?.tap_action, { action: "more-info" });
+    assert.deepEqual(inner?.icon_tap_action, {
+      action: "perform-action",
+      perform_action: "light.toggle",
+      target: { entity_id: desk },
+    });
+    assert.equal(cards.some((card) => card.entity === led), false);
+    assert.equal(cards.some((card) => card.entity === "switch.orphan_led"), false);
+  });
+});
+
+describe("stripRoomName", () => {
+  it("removes a leading room name and one separator", () => {
+    assert.equal(stripRoomName("Man Cave Desk Lamp", "Man Cave"), "Desk Lamp");
+    assert.equal(stripRoomName("Man Cave - Desk Lamp", "Man Cave"), "Desk Lamp");
+    assert.equal(stripRoomName("Man Cave: Desk Lamp", "Man Cave"), "Desk Lamp");
+    assert.equal(stripRoomName("Man Cave|Desk Lamp", "Man Cave"), "Desk Lamp");
+    assert.equal(stripRoomName("Master Bedroom — Under Bed Light Strip", "Master Bedroom"), "Under Bed Light Strip");
+    assert.equal(stripRoomName("Master Bedroom Reading Lamp", "Master Bedroom"), "Reading Lamp");
+    assert.equal(stripRoomName("Man Cave Doors are Correct", "Man Cave"), "Doors are Correct");
+  });
+
+  it("leaves unrelated titles, the exact room name, and the header alone", () => {
+    assert.equal(stripRoomName("Updoot1 Alarm ringing", "Man Cave"), "Updoot1 Alarm ringing");
+    assert.equal(stripRoomName("Man Cave", "Man Cave"), "Man Cave");
+    assert.equal(stripRoomName("man cave desk lamp", "Man Cave"), "desk lamp");
+    assert.equal(stripRoomName("Man Caves are nice", "Man Cave"), "Man Caves are nice");
+
+    const popup = buildPopupConfig(
+      "office_of_drew",
+      "Man Cave",
+      "mdi:office-building",
+      {
+        ...emptySections(),
+        lights: ["light.man_cave_desk_lamp"],
+      },
+      {
+        "light.man_cave_desk_lamp": state("light.man_cave_desk_lamp", "on", {
+          friendly_name: "Man Cave Desk Lamp",
+          supported_color_modes: ["onoff"],
+        }),
+      },
+    );
+    assert.equal(popup.name, "Man Cave");
+    const lamp = (popup.cards as Array<Record<string, unknown>>).find((card) => card.entity === "light.man_cave_desk_lamp");
+    assert.equal(lamp?.primary, "Desk Lamp");
+    const button = buildButtonConfig({
       areaId: "office_of_drew",
       name: "Man Cave",
       icon: "mdi:office-building",
-      sections: emptySections(),
+      sections: { ...emptySections(), lights: ["light.man_cave_desk_lamp"] },
+      states: {
+        "light.man_cave_desk_lamp": state("light.man_cave_desk_lamp", "off"),
+      },
     });
-    const onlyOccupancy = noLights.sub_button as Array<Record<string, unknown>>;
-    assert.equal(onlyOccupancy.length, 1);
-    assert.equal(onlyOccupancy[0]?.icon, "mdi:account");
-    assert.equal(JSON.stringify(noLights).includes("bubble-card"), false);
+    assert.equal(button.name, "Man Cave");
   });
 });

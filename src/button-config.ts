@@ -1,4 +1,5 @@
-import type { AreaSections } from "./sections";
+import { rollupDotClass, rollupDotStyles, sectionRollups } from "./rollups";
+import type { AreaSections, EntityState } from "./sections";
 import { areaHash, BUBBLE_CARD_TYPE } from "./tags";
 
 export interface ButtonConfigInput {
@@ -6,8 +7,7 @@ export interface ButtonConfigInput {
   name: string;
   icon: string;
   sections: AreaSections;
-  lightRepresentative?: string;
-  occupancyRepresentative?: string;
+  states?: Record<string, EntityState | undefined>;
 }
 
 export function buildButtonConfig(input: ButtonConfigInput): Record<string, unknown> {
@@ -16,39 +16,18 @@ export function buildButtonConfig(input: ButtonConfigInput): Record<string, unkn
     action: "navigate",
     navigation_path: hash,
   };
-  const subButtons: Record<string, unknown>[] = [];
-
-  const occupancyButton: Record<string, unknown> = {
-    icon: "mdi:account",
+  const rollups = sectionRollups(input.sections, input.states ?? {});
+  const subButtons = rollups.map((rollup) => ({
     show_name: false,
-    show_icon: true,
-    show_background: true,
+    show_icon: false,
+    show_background: false,
+    css_class: rollupDotClass(rollup),
     tap_action: navigate,
     hold_action: { action: "none" },
     double_tap_action: { action: "none" },
-  };
-  if (input.occupancyRepresentative) occupancyButton.entity = input.occupancyRepresentative;
-  subButtons.push(occupancyButton);
+  }));
 
-  if (input.sections.lights.length > 0) {
-    const lightButton: Record<string, unknown> = {
-      icon: "mdi:lightbulb",
-      show_name: false,
-      show_icon: true,
-      show_background: true,
-      tap_action: {
-        action: "perform-action",
-        perform_action: "light.toggle",
-        target: { entity_id: input.sections.lights },
-      },
-      hold_action: { action: "none" },
-      double_tap_action: { action: "none" },
-    };
-    if (input.lightRepresentative) lightButton.entity = input.lightRepresentative;
-    subButtons.push(lightButton);
-  }
-
-  return {
+  const config: Record<string, unknown> = {
     type: BUBBLE_CARD_TYPE,
     card_type: "button",
     button_type: "name",
@@ -62,4 +41,6 @@ export function buildButtonConfig(input: ButtonConfigInput): Record<string, unkn
     },
     sub_button: subButtons,
   };
+  if (rollups.length > 0) config.styles = rollupDotStyles(rollups);
+  return config;
 }

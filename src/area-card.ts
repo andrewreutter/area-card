@@ -1,13 +1,8 @@
 import { buildButtonConfig } from "./button-config";
 import { ensureDeps } from "./ensure-deps";
+import "./light-row";
 import { buildPopupConfig } from "./popup-cards";
-import {
-  areaDisplay,
-  classifyArea,
-  membershipKey,
-  pickRepresentative,
-  type ClassifierHass,
-} from "./sections";
+import { areaDisplay, classifyArea, membershipKey, type ClassifierHass } from "./sections";
 import { BUBBLE_ELEMENT } from "./tags";
 
 interface AreaCardConfig {
@@ -113,21 +108,15 @@ class AreaCard extends HTMLElement {
     const { name, icon } = areaDisplay(hass, areaId);
     const sections = classifyArea(hass, areaId);
     const signature = membershipKey(areaId, name, icon, sections);
-    const lightRepresentative = pickRepresentative(sections.lights, hass.states ?? {}, "light");
-    const occupancyRepresentative = pickRepresentative(
-      sections.occupancy.map((item) => item.entityId),
-      hass.states ?? {},
-      "presence",
-    );
+    const states = hass.states ?? {};
     const buttonConfig = buildButtonConfig({
       areaId,
       name,
       icon,
       sections,
-      lightRepresentative,
-      occupancyRepresentative,
+      states,
     });
-    const popupConfig = buildPopupConfig(areaId, name, icon, sections, hass.states ?? {});
+    const popupConfig = buildPopupConfig(areaId, name, icon, sections, states);
     const buttonKey = JSON.stringify(buttonConfig);
     const popupKey = JSON.stringify(popupConfig);
 

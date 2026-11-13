@@ -9,7 +9,11 @@ area: office_of_drew
 
 The visual editor has one required field, the area. There is no name, icon, hash, light, or visibility option on the card. Floor visibility stays on the Lovelace card's own Visibility tab.
 
-The button and the popup are the same card. The lights sub-button toggles every light in the area except hidden, diagnostic, config, and satellite LEDs. It is hidden when none remain. The occupancy sub-button highlights when an occupancy, motion, presence, chair, or bed entity in the area is on, and opens the same popup.
+The button and the popup are the same card. The collapsed button shows one dot per status rollup, filled when that section is active and muted when the count is zero. Tapping the button or a dot opens the popup.
+
+Status lists those rollups, such as `Lights 1/4 On`. Temperature and humidity sensors are cards under Climate. Entities that belong to a kiosk satellite stay on the one Kiosk & Satellites card.
+
+On/off lights toggle from the icon; the rest of the row opens more-info. Dimmable lights keep the Mushroom light card. A `switch.*_led` on the same device is a dot on the right of that light and toggles only the LED. Entity titles in the popup drop a leading room name. The popup header and the collapsed button keep the full room name.
 
 ## Private Bubble Card and Mushroom
 

@@ -45,11 +45,13 @@ export interface OccupancyItem {
 export interface SatelliteItem {
   entityId: string;
   ledEntityId?: string;
+  alarmEntityId?: string;
 }
 
 export interface AreaSections {
-  status: string[];
+  climate: string[];
   lights: string[];
+  lightLeds: Record<string, string>;
   mediaPlayers: string[];
   switches: string[];
   occupancy: OccupancyItem[];
@@ -65,8 +67,9 @@ const OPENING_CLASSES = new Set(["door", "window", "opening", "garage_door"]);
 
 export function emptySections(): AreaSections {
   return {
-    status: [],
+    climate: [],
     lights: [],
+    lightLeds: {},
     mediaPlayers: [],
     switches: [],
     occupancy: [],
@@ -89,7 +92,9 @@ export function areaDisplay(hass: ClassifierHass, areaId: string): { name: strin
 export function classifyArea(hass: ClassifierHass, areaId: string): AreaSections {
   const devices = deviceMap(hass.devices);
   const states = hass.states ?? {};
-  const entries = registryEntries(hass).filter((entry) => {
+  const allEntries = registryEntries(hass);
+  const satelliteDevices = satelliteDeviceIds(allEntries, devices);
+  const entries = allEntries.filter((entry) => {
     if (!entry.entity_id || !states[entry.entity_id]) return false;
     if (isHidden(entry)) return false;
     return areaOf(entry, devices) === areaId;
@@ -105,7 +110,10 @@ export function classifyArea(hass: ClassifierHass, areaId: string): AreaSections
     }
   }
 
+  const renderedLights = entries.filter((entry) => isRenderedLight(entry, devices, satelliteDevices, states));
+  const lightLeds = assignLightLeds(renderedLights, entries, satelliteDevices);
   const sections = emptySections();
+  sections.lightLeds = lightLeds;
 
   for (const entry of entries) {
     const id = entry.entity_id;
@@ -117,23 +125,24 @@ export function classifyArea(hass: ClassifierHass, areaId: string): AreaSections
 
     if (isPressureReading(id, dc)) continue;
 
+    if (isSatelliteRelated(entry, satelliteDevices)) {
+      if (domain === "assist_satellite") {
+        sections.satellites.push(satelliteItem(entry, entries, states));
+      }
+      continue;
+    }
+
     if (domain === "automation") {
       sections.automations.push(id);
       continue;
     }
 
-    if (domain === "assist_satellite") {
-      sections.satellites.push({
-        entityId: id,
-        ledEntityId: companionLed(entry.device_id, entries),
-      });
+    if (domain === "sensor" && (dc === "temperature" || dc === "humidity")) {
+      if (!suppressed) sections.climate.push(id);
       continue;
     }
 
-    if (isLedSwitch(id)) {
-      sections.helpers.push(id);
-      continue;
-    }
+    if (isLedSwitch(id)) continue;
 
     if (entry.platform === "template") {
       sections.helpers.push(id);
@@ -153,7 +162,7 @@ export function classifyArea(hass: ClassifierHass, areaId: string): AreaSections
     }
 
     if (domain === "switch") {
-      if (suppressed || isKioskSatellite(device)) continue;
+      if (suppressed) continue;
       sections.switches.push(id);
       continue;
     }
@@ -185,19 +194,11 @@ export function classifyArea(hass: ClassifierHass, areaId: string): AreaSections
           entityId: id,
           pressureEntityId: entry.device_id ? pressureByDevice.get(entry.device_id) : undefined,
         });
-        continue;
       }
-      sections.status.push(id);
-      continue;
-    }
-
-    if (domain === "sensor" && (dc === "temperature" || dc === "humidity")) {
-      if (suppressed) continue;
-      sections.status.push(id);
     }
   }
 
-  sections.status = sortIds(sections.status, states);
+  sections.climate = sortIds(sections.climate, states);
   sections.lights = sortIds(sections.lights, states);
   sections.mediaPlayers = sortIds(sections.mediaPlayers, states);
   sections.switches = sortIds(sections.switches, states);
@@ -215,14 +216,16 @@ export function membershipKey(areaId: string, name: string, icon: string, sectio
     .map((item) => `${item.entityId}=${item.pressureEntityId ?? ""}`)
     .join(",");
   const satellites = sections.satellites
-    .map((item) => `${item.entityId}=${item.ledEntityId ?? ""}`)
+    .map((item) => `${item.entityId}=${item.ledEntityId ?? ""}=${item.alarmEntityId ?? ""}`)
     .join(",");
+  const leds = sections.lights.map((id) => `${id}=${sections.lightLeds[id] ?? ""}`).join(",");
   return [
     areaId,
     name,
     icon,
-    sections.status.join(","),
+    sections.climate.join(","),
     sections.lights.join(","),
+    leds,
     sections.mediaPlayers.join(","),
     sections.switches.join(","),
     occupancy,
@@ -232,19 +235,6 @@ export function membershipKey(areaId: string, name: string, icon: string, sectio
     sections.selects.join(","),
     sections.automations.join(","),
   ].join("|");
-}
-
-const LIGHT_ACTIVE = new Set(["on"]);
-const PRESENCE_ACTIVE = new Set(["on", "home", "occupied", "open", "true", "active"]);
-
-export function pickRepresentative(
-  ids: string[],
-  states: Record<string, EntityState | undefined>,
-  kind: "light" | "presence",
-): string | undefined {
-  if (ids.length === 0) return undefined;
-  const active = kind === "light" ? LIGHT_ACTIVE : PRESENCE_ACTIVE;
-  return ids.find((id) => active.has(states[id]?.state ?? "")) ?? ids[0];
 }
 
 function registryEntries(hass: ClassifierHass): RegistryEntry[] {
@@ -296,6 +286,24 @@ function friendlyName(state: EntityState | undefined): string | undefined {
   return typeof name === "string" ? name : undefined;
 }
 
+function satelliteDeviceIds(entries: RegistryEntry[], devices: Record<string, DeviceEntry>): Set<string> {
+  const ids = new Set<string>();
+  for (const entry of entries) {
+    if (!entry.device_id) continue;
+    const domain = entry.entity_id.split(".")[0] ?? "";
+    if (domain === "assist_satellite" || isKioskSatellite(devices[entry.device_id])) {
+      ids.add(entry.device_id);
+    }
+  }
+  return ids;
+}
+
+function isSatelliteRelated(entry: RegistryEntry, satelliteDevices: Set<string>): boolean {
+  const domain = entry.entity_id.split(".")[0] ?? "";
+  if (domain === "assist_satellite") return true;
+  return Boolean(entry.device_id && satelliteDevices.has(entry.device_id));
+}
+
 function isKioskSatellite(device: DeviceEntry | undefined): boolean {
   return /kiosk[\s_-]*satellite/i.test(device?.manufacturer ?? "");
 }
@@ -308,6 +316,69 @@ function isSatelliteLed(entityId: string, device: DeviceEntry | undefined): bool
 
 function isLedSwitch(entityId: string): boolean {
   return /^switch\..*_led$/.test(entityId);
+}
+
+function isRenderedLight(
+  entry: RegistryEntry,
+  devices: Record<string, DeviceEntry>,
+  satelliteDevices: Set<string>,
+  states: Record<string, EntityState>,
+): boolean {
+  const id = entry.entity_id;
+  if (!id.startsWith("light.")) return false;
+  if (isSatelliteRelated(entry, satelliteDevices)) return false;
+  if (isDiagnosticOrConfig(entry)) return false;
+  if (entry.platform === "template") return false;
+  const device = entry.device_id ? devices[entry.device_id] : undefined;
+  if (isSatelliteLed(id, device)) return false;
+  if (isPressureReading(id, deviceClass(entry, states[id]))) return false;
+  return true;
+}
+
+function assignLightLeds(
+  lights: RegistryEntry[],
+  entries: RegistryEntry[],
+  satelliteDevices: Set<string>,
+): Record<string, string> {
+  const leds = entries.filter(
+    (entry) => isLedSwitch(entry.entity_id) && entry.device_id && !isSatelliteRelated(entry, satelliteDevices),
+  );
+  const assigned = new Map<string, string>();
+  const used = new Set<string>();
+
+  for (const light of lights) {
+    if (!light.device_id) continue;
+    const stem = light.entity_id.slice("light.".length);
+    const named = leds.find(
+      (entry) =>
+        entry.device_id === light.device_id &&
+        entry.entity_id === `switch.${stem}_led` &&
+        !used.has(entry.entity_id),
+    );
+    if (!named) continue;
+    assigned.set(light.entity_id, named.entity_id);
+    used.add(named.entity_id);
+  }
+
+  for (const light of lights) {
+    if (!light.device_id || assigned.has(light.entity_id)) continue;
+    const available = leds.filter((entry) => entry.device_id === light.device_id && !used.has(entry.entity_id));
+    const openLights = lights.filter((entry) => entry.device_id === light.device_id && !assigned.has(entry.entity_id));
+    if (available.length !== 1 || openLights.length !== 1) continue;
+    assigned.set(light.entity_id, available[0].entity_id);
+    used.add(available[0].entity_id);
+  }
+
+  return Object.fromEntries(assigned);
+}
+
+function satelliteItem(entry: RegistryEntry, entries: RegistryEntry[], states: Record<string, EntityState>): SatelliteItem {
+  const item: SatelliteItem = { entityId: entry.entity_id };
+  const led = companionLed(entry.device_id, entries);
+  const alarm = companionAlarm(entry.device_id, entries, states);
+  if (led) item.ledEntityId = led;
+  if (alarm) item.alarmEntityId = alarm;
+  return item;
 }
 
 function isPressureReading(entityId: string, deviceClassName: string | undefined): boolean {
@@ -337,6 +408,30 @@ function companionLed(deviceId: string | null | undefined, entries: RegistryEntr
     .map((entry) => entry.entity_id)
     .sort();
   return lights.find((id) => id.includes("led_control")) ?? lights.find((id) => id.includes("led")) ?? lights[0];
+}
+
+function companionAlarm(
+  deviceId: string | null | undefined,
+  entries: RegistryEntry[],
+  states: Record<string, EntityState>,
+): string | undefined {
+  if (!deviceId) return undefined;
+  const matches = entries
+    .filter(
+      (entry) =>
+        entry.device_id === deviceId &&
+        entry.entity_id.startsWith("binary_sensor.") &&
+        isAlarmRinging(entry.entity_id, states[entry.entity_id]),
+    )
+    .map((entry) => entry.entity_id)
+    .sort();
+  return matches[0];
+}
+
+function isAlarmRinging(entityId: string, state: EntityState | undefined): boolean {
+  if (entityId.includes("alarm_ringing")) return true;
+  const name = friendlyName(state);
+  return Boolean(name && /alarm[\s_-]*ringing/i.test(name));
 }
 
 function sortIds(ids: string[], states: Record<string, EntityState>): string[] {
