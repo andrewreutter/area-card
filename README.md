@@ -19,6 +19,8 @@ On/off lights toggle from the icon; the rest of the row opens more-info. Dimmabl
 
 A collapsible floor header. Clicking the header collapses or expands the card. When expanded, one Area Card is shown for each area assigned to the floor, sorted alphabetically.
 
+The header is a section title: the floor name, a rule, and a collapse control. Its icon comes from the floor registry. A floor with no icon shows no icon.
+
 ```yaml
 type: custom:floor-card
 floor: downstairs

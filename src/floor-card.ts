@@ -157,41 +157,119 @@ class FloorCard extends HTMLElement {
   }
 
   private buildHeader(): HTMLElement {
+    FloorCard.ensureStyles();
     const header = document.createElement("div");
     header.className = "floor-card-header";
-    header.style.cssText =
-      "display:flex;align-items:center;gap:8px;padding:4px 0 8px;cursor:pointer;user-select:none";
     header.addEventListener("click", () => this.toggle());
     return header;
   }
 
-  private populateHeader(header: HTMLElement, icon: string, name: string): void {
+  private populateHeader(header: HTMLElement, icon: string | null, name: string): void {
     header.innerHTML = "";
 
-    const iconEl = document.createElement("ha-icon");
-    iconEl.setAttribute("icon", icon);
-    iconEl.style.cssText = "--mdc-icon-size:20px;flex-shrink:0";
+    if (icon) {
+      const iconEl = document.createElement("ha-icon");
+      iconEl.className = "floor-card-icon";
+      iconEl.setAttribute("icon", icon);
+      header.append(iconEl);
+    }
 
-    const nameEl = document.createElement("span");
-    nameEl.className = "floor-card-name";
+    const nameEl = document.createElement("h4");
+    nameEl.className = icon ? "floor-card-name" : "floor-card-name floor-card-name-plain";
     nameEl.textContent = name;
-    nameEl.style.cssText =
-      "flex:1;font-weight:500;font-size:var(--paper-font-subhead_-_font-size,1rem);" +
-      "color:var(--primary-text-color,inherit)";
 
+    const lineEl = document.createElement("div");
+    lineEl.className = "floor-card-line";
+
+    const chevronWrap = document.createElement("div");
+    chevronWrap.className = "floor-card-chevron";
     const chevronEl = document.createElement("ha-icon");
-    chevronEl.setAttribute("icon", "mdi:chevron-down");
     chevronEl.dataset.floorChevron = "";
-    chevronEl.style.cssText = `flex-shrink:0;--mdc-icon-size:20px;transition:transform 0.2s;transform:rotate(${this._expanded ? "0" : "-90"}deg)`;
+    chevronEl.setAttribute("icon", this.chevronIcon());
+    chevronWrap.append(chevronEl);
 
-    header.append(iconEl, nameEl, chevronEl);
+    header.append(nameEl, lineEl, chevronWrap);
+  }
+
+  private chevronIcon(): string {
+    return this._expanded ? "mdi:chevron-up" : "mdi:chevron-down";
   }
 
   private syncChevron(): void {
     const chevron = this.headerEl?.querySelector<HTMLElement>("[data-floor-chevron]");
     if (chevron) {
-      chevron.style.transform = `rotate(${this._expanded ? "0" : "-90"}deg)`;
+      chevron.setAttribute("icon", this.chevronIcon());
     }
+  }
+
+  private static ensureStyles(): void {
+    if (document.getElementById("floor-card-styles")) return;
+    const style = document.createElement("style");
+    style.id = "floor-card-styles";
+    // Matches a Bubble Card separator row: 16px/600 title, rule, and round chevron.
+    // Row size is fixed at 0.8, the separator's own row, so a section's card row size
+    // does not stretch the title. The icon is optional and only rendered when present.
+    style.textContent = `
+floor-card .floor-card-header {
+  display: flex;
+  align-items: center;
+  box-sizing: border-box;
+  height: calc(var(--row-height, 44px) * 0.8 + var(--row-gap, 8px) * (0.8 - 1));
+  background: none;
+  overflow: visible;
+  cursor: pointer;
+  user-select: none;
+  color: var(--primary-text-color);
+}
+floor-card .floor-card-icon {
+  display: inline-flex;
+  flex: 0 0 auto;
+  width: 24px;
+  height: 24px;
+  margin: 0 22px 0 8px;
+  --mdc-icon-size: 24px;
+  color: var(--primary-text-color);
+}
+floor-card .floor-card-name {
+  display: block;
+  margin: 0 30px 0 0;
+  padding: 0;
+  font-family: inherit;
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.6;
+  color: var(--primary-text-color);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+floor-card .floor-card-name-plain {
+  margin-left: 16px;
+}
+floor-card .floor-card-line {
+  flex: 1 1 auto;
+  height: 6px;
+  margin: 0 14px 0 0;
+  border-radius: 6px;
+  opacity: 0.6;
+  background-color: var(--bubble-line-background-color, var(--ha-card-background-color, var(--secondary-background-color)));
+}
+floor-card .floor-card-chevron {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  box-sizing: border-box;
+  width: 36px;
+  height: 36px;
+  margin-left: 8px;
+  border-radius: 18px;
+  background-color: var(--bubble-icon-background-color, rgba(255, 255, 255, 0.7));
+  --mdc-icon-size: 20px;
+  color: var(--primary-text-color);
+}
+`;
+    document.head.append(style);
   }
 
   private syncAreaCards(areas: AreaRef[], hass: ClassifierHass): void {

@@ -969,19 +969,26 @@ describe("floorDisplay", () => {
     assert.equal(floorDisplay(h, "f1").name, "f1");
   });
 
-  it("falls back to mdi:home-floor-0 when icon is missing", () => {
+  it("returns no icon when the floor icon is missing", () => {
     const h = floorHass({ f1: { floor_id: "f1", name: "Ground" } }, {});
-    assert.equal(floorDisplay(h, "f1").icon, "mdi:home-floor-0");
+    assert.equal(floorDisplay(h, "f1").icon, null);
   });
 
-  it("returns the floor id and default icon when the floor is unknown", () => {
+  it("returns no icon when the floor icon is null or empty", () => {
+    const missing = floorHass({ f1: { floor_id: "f1", name: "Ground", icon: null } }, {});
+    const empty = floorHass({ f1: { floor_id: "f1", name: "Ground", icon: "" } }, {});
+    assert.equal(floorDisplay(missing, "f1").icon, null);
+    assert.equal(floorDisplay(empty, "f1").icon, null);
+  });
+
+  it("returns the floor id and no icon when the floor is unknown", () => {
     const h = floorHass({}, {});
-    assert.deepEqual(floorDisplay(h, "unknown"), { name: "unknown", icon: "mdi:home-floor-0" });
+    assert.deepEqual(floorDisplay(h, "unknown"), { name: "unknown", icon: null });
   });
 
-  it("returns the floor id and default icon when floors registry is absent", () => {
+  it("returns the floor id and no icon when floors registry is absent", () => {
     const h: ClassifierHass = {};
-    assert.deepEqual(floorDisplay(h, "x"), { name: "x", icon: "mdi:home-floor-0" });
+    assert.deepEqual(floorDisplay(h, "x"), { name: "x", icon: null });
   });
 });
 

@@ -1,10 +1,14 @@
 import type { AreaEntry, ClassifierHass } from "./sections";
 
-export function floorDisplay(hass: ClassifierHass, floorId: string): { name: string; icon: string } {
+export function floorDisplay(
+  hass: ClassifierHass,
+  floorId: string,
+): { name: string; icon: string | null } {
   const floor = hass.floors?.[floorId];
+  const icon = floor?.icon;
   return {
     name: floor?.name || floorId,
-    icon: floor?.icon || "mdi:home-floor-0",
+    icon: icon ? icon : null,
   };
 }
 
