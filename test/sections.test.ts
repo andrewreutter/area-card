@@ -529,6 +529,13 @@ describe("popup and button configs", () => {
     assert.match(styles, /visibility: hidden !important/);
     assert.match(styles, /pointer-events: none !important/);
     assert.match(styles, /width: 14px !important/);
+    assert.match(styles, /:host\s*\{[^}]*--bubble-box-shadow:\s*var\(--ha-card-box-shadow\)/);
+    assert.match(
+      styles,
+      /--bubble-main-background-color:\s*var\(--ha-card-background,\s*var\(--card-background-color\)\)/,
+    );
+    assert.match(styles, /--bubble-border-radius:\s*var\(--ha-card-border-radius\)/);
+    assert.match(styles, /--bubble-icon-border-radius:\s*50%/);
     const emptyRule = styles.slice(styles.indexOf('[class*="-empty"]'));
     assert.equal(emptyRule.includes("display: none"), false);
     assert.equal(styles.includes("background: rgb(255, 193, 7)"), false);

@@ -212,6 +212,21 @@ export function rollupDotClass(rollup: SectionRollup): string {
   return `area-dot-${rollup.id}-${rollup.active > 0 ? "on" : "off"}`;
 }
 
+/**
+ * Collapsed button chrome. Bubble clears ha-card's shadow inline and paints
+ * the pill from these variables. An unset --ha-card-border-radius leaves
+ * --bubble-border-radius invalid, so Bubble keeps its own pill radius.
+ * The icon variable stays at 50% so the room glyph does not follow that radius.
+ */
+const COLLAPSED_BUTTON_THEME_STYLES = [
+  ":host {",
+  "  --bubble-box-shadow: var(--ha-card-box-shadow);",
+  "  --bubble-main-background-color: var(--ha-card-background, var(--card-background-color));",
+  "  --bubble-border-radius: var(--ha-card-border-radius);",
+  "  --bubble-icon-border-radius: 50%;",
+  "}",
+].join("\n");
+
 export function rollupDotStyles(rollups: SectionRollup[]): string {
   const shape = [
     '.bubble-sub-button[class*="area-dot-"].hidden,',
@@ -253,7 +268,7 @@ export function rollupDotStyles(rollups: SectionRollup[]): string {
     }
     return `${cls} { background: transparent !important; box-shadow: inset 0 0 0 1.5px ${rollup.color} !important; }`;
   });
-  return [...shape, ...empty, ...colors].join("\n");
+  return [COLLAPSED_BUTTON_THEME_STYLES, ...shape, ...empty, ...colors].join("\n");
 }
 
 function isOnOffEntity(entityId: string): boolean {
