@@ -1,3 +1,16 @@
+/**
+ * Bubble's standalone popup takes the nearest `hui-card` out of the layout
+ * while it is open (`position: absolute`) and hides that row when it closes
+ * (`display: none`). A room popup is rendered inside the floor card, so that
+ * row is the whole floor. Bubble already skips this for
+ * `vertical-stack-in-card`. The floor card reports the same type.
+ */
+export const BUBBLE_SHARED_STACK_TYPE = "custom:vertical-stack-in-card";
+
+export function floorRuntimeConfig(floor: string): { floor: string; type: typeof BUBBLE_SHARED_STACK_TYPE } {
+  return { floor, type: BUBBLE_SHARED_STACK_TYPE };
+}
+
 /** localStorage is already per origin, so the floor id does not need a hass URL. */
 export const FLOOR_EXPANDED_KEY_PREFIX = "area-card-floor-expanded:";
 

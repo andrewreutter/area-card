@@ -1,10 +1,11 @@
-import { browserStorage, readFloorExpanded, writeFloorExpanded } from "./floor-state";
+import { browserStorage, floorRuntimeConfig, readFloorExpanded, writeFloorExpanded } from "./floor-state";
 import { areasOnFloor, floorDisplay, type AreaRef } from "./floors";
 import { ROLLUP_ORDER, sectionHasEntities, type RollupId } from "./rollups";
 import { classifyArea, type ClassifierHass } from "./sections";
 
 interface FloorCardConfig {
   floor: string;
+  type: "custom:vertical-stack-in-card";
 }
 
 type AreaCardElement = HTMLElement & {
@@ -39,7 +40,7 @@ class FloorCard extends HTMLElement {
     return CONFIG_FORM;
   }
 
-  static getStubConfig(hass?: ClassifierHass): FloorCardConfig {
+  static getStubConfig(hass?: ClassifierHass): { floor: string } {
     const first = hass?.floors ? Object.keys(hass.floors)[0] : undefined;
     return { floor: first || "floor" };
   }
@@ -78,7 +79,7 @@ class FloorCard extends HTMLElement {
       this.renderedAreas = undefined;
       this.renderedHide = undefined;
     }
-    this._config = { floor: config.floor };
+    this._config = floorRuntimeConfig(config.floor);
     this.schedule();
   }
 

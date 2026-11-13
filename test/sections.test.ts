@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { buildButtonConfig } from "../src/button-config";
-import { floorExpandedKey, parseFloorExpanded } from "../src/floor-state";
+import { floorExpandedKey, floorRuntimeConfig, parseFloorExpanded } from "../src/floor-state";
 import { areasOnFloor, floorDisplay } from "../src/floors";
 import { stripRoomName } from "../src/names";
 import { tooltipPosition } from "../src/dot-tooltip";
@@ -1396,6 +1396,13 @@ describe("floor expanded storage", () => {
     assert.equal(floorExpandedKey("upstairs"), "area-card-floor-expanded:upstairs");
     assert.equal(floorExpandedKey("downstairs"), "area-card-floor-expanded:downstairs");
     assert.equal(floorExpandedKey("cabin"), "area-card-floor-expanded:cabin");
+  });
+
+  it("tells Bubble the floor is a shared stack so a room popup does not hide it", () => {
+    assert.deepEqual(floorRuntimeConfig("upstairs"), {
+      floor: "upstairs",
+      type: "custom:vertical-stack-in-card",
+    });
   });
 
   it("parses stored booleans and uses expanded when the value is missing", () => {
