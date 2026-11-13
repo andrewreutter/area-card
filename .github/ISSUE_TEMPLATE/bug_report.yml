@@ -1,0 +1,60 @@
+name: Bug report
+description: A card doesn't show, line up, or open the way it should.
+labels: [bug]
+body:
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you expected the card to show, and what it showed instead.
+    validations:
+      required: true
+  - type: input
+    id: ha-version
+    attributes:
+      label: Home Assistant version
+      description: From **Settings > About**.
+      placeholder: "2026.9.2"
+    validations:
+      required: true
+  - type: dropdown
+    id: channel
+    attributes:
+      label: Release channel
+      options:
+        - Stable
+        - Beta
+        - Dev
+    validations:
+      required: true
+  - type: input
+    id: card-version
+    attributes:
+      label: Area Card version
+      description: From HACS.
+      placeholder: "1.0.20"
+    validations:
+      required: true
+  - type: dropdown
+    id: which-card
+    attributes:
+      label: Which card
+      options:
+        - Area Card
+        - Floor Card
+        - Floors Card
+    validations:
+      required: true
+  - type: input
+    id: browser
+    attributes:
+      label: Browser
+      placeholder: "Safari 18, Chrome 131"
+    validations:
+      required: true
+  - type: textarea
+    id: yaml
+    attributes:
+      label: Card YAML
+      description: The card configuration, with any private names you're willing to share.
+      render: yaml

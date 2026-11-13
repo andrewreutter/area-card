@@ -3,7 +3,12 @@
   "version": "1.0.20",
   "private": true,
   "type": "module",
-  "description": "Home Assistant Lovelace card that shows an area button and its popup.",
+  "description": "Helpmeet: Area Card. Lovelace cards for a Home Assistant area, a floor, and every floor.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Helpmeeters/area-card.git"
+  },
   "scripts": {
     "prefix-vendor": "node scripts/prefix-vendor.mjs",
     "build": "npm run prefix-vendor && rollup -c",

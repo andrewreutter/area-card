@@ -370,6 +370,7 @@ type CustomCard = {
   name: string;
   description: string;
   preview: boolean;
+  documentationURL: string;
 };
 
 const registry = window as Window & { customCards?: CustomCard[] };
@@ -380,5 +381,6 @@ if (!registry.customCards.some((card) => card.type === "area-card")) {
     name: "Area Card",
     description: "Area summary button and popup",
     preview: true,
+    documentationURL: "https://github.com/Helpmeeters/area-card",
   });
 }

@@ -178,6 +178,7 @@ type CustomCard = {
   name: string;
   description: string;
   preview: boolean;
+  documentationURL: string;
 };
 
 const registry = window as Window & { customCards?: CustomCard[] };
@@ -188,5 +189,6 @@ if (!registry.customCards.some((card) => card.type === "floors-card")) {
     name: "Floors Card",
     description: "One Floor Card for each floor",
     preview: true,
+    documentationURL: "https://github.com/Helpmeeters/area-card#floors-card",
   });
 }

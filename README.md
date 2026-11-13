@@ -1,4 +1,4 @@
-# Area Card
+# Helpmeet: Area Card
 
 A [HACS](https://hacs.xyz/) Lovelace card for one Home Assistant area. Pick the area. The card reads the area name and icon, opens a `#area-<area_id>` popup, and fills that popup from the entities assigned to the area. The card also reads the area picture and uses it as the background of the button and the popup. The popup photo fits the dialog width and sits at the top.
 
@@ -69,4 +69,16 @@ License texts are in `LICENSES/`.
 
 ## Install
 
-Add `https://github.com/andrewreutter/area-card` in HACS as a Lovelace plugin (category `plugin`) and download the latest release. HACS registers the `area-card.js` resource. The release also includes `area-card-bubble.js` and `area-card-mushroom.js`, which the card loads at runtime.
+Add `https://github.com/Helpmeeters/area-card` in HACS as a Lovelace plugin (category `plugin`) and install **Helpmeet: Area Card**. HACS registers the `area-card.js` resource. The release also includes `area-card-bubble.js` and `area-card-mushroom.js`, which the card loads at runtime.
+
+## Contributing
+
+Bug reports and pull requests are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for the development setup and what to include in a bug report, and [SECURITY.md](SECURITY.md) for reporting vulnerabilities privately.
+
+## Written with AI assistance
+
+Much of this card's code, tests, and documentation was written with the help of AI coding assistants, then reviewed, tested, and directed by a human maintainer. If something looks wrong, please [open an issue](https://github.com/Helpmeeters/area-card/issues).
+
+## License
+
+[MIT](LICENSE). Area Card is part of Helpmeet, a family of Home Assistant integrations.

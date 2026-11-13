@@ -2,7 +2,7 @@
 
 HACS Lovelace plugin (not a Python custom component). Product behavior is in `README.md`. This file is the operational path so you do not rediscover it.
 
-Repo: `https://github.com/andrewreutter/area-card`. Cards ship in one bundle, `area-card.js`, which registers both `area-card` (`custom:area-card`) and `floor-card` (`custom:floor-card`).
+Repo: `https://github.com/Helpmeeters/area-card`. Cards ship in one bundle, `area-card.js`, which registers both `area-card` (`custom:area-card`) and `floor-card` (`custom:floor-card`).
 
 ## Browse
 
