@@ -76,7 +76,7 @@ const META: Record<RollupId, Omit<SectionRollup, "id" | "active" | "total">> = {
     word: "Open",
   },
   satellites: {
-    title: "Kiosk & Satellites",
+    title: "Satellites",
     icon: "mdi:tablet-dashboard",
     iconColor: "indigo",
     color: "rgb(63, 81, 181)",

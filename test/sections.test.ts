@@ -4,7 +4,7 @@ import { buildButtonConfig } from "../src/button-config";
 import { stripRoomName } from "../src/names";
 import { tooltipPosition } from "../src/dot-tooltip";
 import { buildPopupCards, buildPopupConfig } from "../src/popup-cards";
-import { dotTooltipLabel, rollupLabel, sectionRollups } from "../src/rollups";
+import { dotTooltipLabel, rollupLabel, sectionRollups, sectionTitle } from "../src/rollups";
 import {
   classifyArea,
   emptySections,
@@ -694,6 +694,10 @@ describe("satellite scope", () => {
     assert.equal(String(kiosk?.secondary).includes("light.updoot_led_control_idle"), true);
     assert.equal(kiosk?.primary, "Updoot1 Assist satellite");
     assert.equal(cards.some((card) => card.entity === "binary_sensor.updoot_alarm_ringing"), false);
+    assert.deepEqual(
+      cards.filter((card) => card.title).map((card) => card.title),
+      ["Status", "Lights", "Entries", "Satellites"],
+    );
   });
 });
 
@@ -796,6 +800,54 @@ describe("section rollups", () => {
     );
     const climate = cards.find((card) => card.entity === "sensor.temp");
     assert.equal(climate?.name, "Temperature");
+  });
+
+  it("labels the satellite section Satellites and counts alarm or companion LED", () => {
+    const sections = {
+      ...emptySections(),
+      satellites: [
+        {
+          entityId: "assist_satellite.kiosk",
+          ledEntityId: "light.kiosk_led",
+          alarmEntityId: "binary_sensor.kiosk_alarm",
+        },
+      ],
+    };
+    const offStates = {
+      "assist_satellite.kiosk": state("assist_satellite.kiosk", "idle", { friendly_name: "Man Cave Kiosk" }),
+      "binary_sensor.kiosk_alarm": state("binary_sensor.kiosk_alarm", "off"),
+      "light.kiosk_led": state("light.kiosk_led", "off"),
+    };
+    const off = sectionRollups(sections, offStates);
+    assert.equal(sectionTitle("satellites"), "Satellites");
+    assert.equal(off[0]?.id, "satellites");
+    assert.deepEqual(
+      off.map((rollup) => rollupLabel(rollup)),
+      ["Satellites 0/1 On"],
+    );
+    assert.equal(dotTooltipLabel("bubble-sub-button area-dot-satellites-off", off), "Satellites 0/1 On");
+    assert.equal(dotTooltipLabel("bubble-sub-button area-dot-satellites-empty", off), null);
+
+    const cards = buildPopupCards(sections, offStates, "Man Cave");
+    assert.deepEqual(
+      cards.filter((card) => card.title).map((card) => card.title),
+      ["Status", "Satellites"],
+    );
+    const chips = cards.find((card) => String(card.type).endsWith("chips-card"));
+    const contents = (chips?.chips as Array<{ content: string }>).map((chip) => chip.content);
+    assert.deepEqual(contents, ["Satellites 0/1 On"]);
+
+    const alarmOn = sectionRollups(sections, {
+      ...offStates,
+      "binary_sensor.kiosk_alarm": state("binary_sensor.kiosk_alarm", "on"),
+    });
+    assert.equal(rollupLabel(alarmOn[0]!), "Satellites 1/1 On");
+    const ledOn = sectionRollups(sections, {
+      "binary_sensor.kiosk_alarm": state("binary_sensor.kiosk_alarm", "off"),
+      "light.kiosk_led": state("light.kiosk_led", "on"),
+    });
+    assert.equal(rollupLabel(ledOn[0]!), "Satellites 1/1 On");
+    assert.equal(JSON.stringify(cards).includes("Kiosk & Satellites"), false);
   });
 });
 
