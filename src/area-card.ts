@@ -127,7 +127,7 @@ class AreaCard extends HTMLElement {
       lightRepresentative,
       occupancyRepresentative,
     });
-    const popupConfig = buildPopupConfig(areaId, name, icon, sections);
+    const popupConfig = buildPopupConfig(areaId, name, icon, sections, hass.states ?? {});
     const buttonKey = JSON.stringify(buttonConfig);
     const popupKey = JSON.stringify(popupConfig);
 

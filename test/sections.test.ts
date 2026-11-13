@@ -301,11 +301,17 @@ describe("popup and button configs", () => {
   });
 
   it("renders only the sections that have entities, with prefixed mushroom types", () => {
-    const cards = buildPopupCards({
-      ...emptySections(),
-      lights: ["light.reading_lamp", "light.under_bed"],
-      occupancy: [{ entityId: "binary_sensor.bed", pressureEntityId: "sensor.bed_pressure" }],
-    });
+    const cards = buildPopupCards(
+      {
+        ...emptySections(),
+        lights: ["light.reading_lamp", "light.under_bed"],
+        occupancy: [{ entityId: "binary_sensor.bed", pressureEntityId: "sensor.bed_pressure" }],
+      },
+      {
+        "light.reading_lamp": state("light.reading_lamp", "on", { supported_color_modes: ["brightness"] }),
+        "light.under_bed": state("light.under_bed", "on", { supported_color_modes: ["color_temp", "xy"] }),
+      },
+    );
     const titles = cards.filter((card) => card.title).map((card) => card.title);
     assert.deepEqual(titles, ["Lights", "Occupancy"]);
     assert.equal(cards.some((card) => JSON.stringify(card).includes("sensor.bed_pressure") && card.type?.toString().includes("entity-card")), false);
@@ -315,6 +321,54 @@ describe("popup and button configs", () => {
     assert.ok(types.includes("custom:area-card-mushroom-template-card"));
     assert.equal(types.some((type) => type.startsWith("custom:mushroom-")), false);
     assert.equal(JSON.stringify(cards).includes("custom:bubble-card"), false);
+  });
+
+  it("toggles an on/off light from the icon and opens more-info from the row", () => {
+    const desk = "light.man_cave_desk_lamp";
+    const strip = "light.master_bedroom_under_bed_light_strip";
+    const cards = buildPopupCards(
+      { ...emptySections(), lights: [desk, strip, "light.no_modes"] },
+      {
+        [desk]: state(desk, "off", { friendly_name: "Man Cave Desk Lamp", supported_color_modes: ["onoff"] }),
+        [strip]: state(strip, "on", { supported_color_modes: ["color_temp", "xy"] }),
+        "light.no_modes": state("light.no_modes", "off", {}),
+      },
+    );
+    const onOff = cards.find((card) => card.entity === desk);
+    const dimmable = cards.find((card) => card.entity === strip);
+    const unknown = cards.find((card) => card.entity === "light.no_modes");
+
+    assert.equal(onOff?.type, "custom:area-card-mushroom-template-card");
+    assert.deepEqual(onOff?.tap_action, { action: "more-info" });
+    assert.deepEqual(onOff?.icon_tap_action, {
+      action: "perform-action",
+      perform_action: "light.toggle",
+      target: { entity_id: desk },
+    });
+    assert.equal(JSON.stringify(onOff).includes("show_brightness_control"), false);
+
+    assert.equal(unknown?.type, "custom:area-card-mushroom-template-card");
+    assert.deepEqual((unknown?.icon_tap_action as { target: { entity_id: string } }).target.entity_id, "light.no_modes");
+
+    assert.equal(dimmable?.type, "custom:area-card-mushroom-light-card");
+    assert.equal(dimmable?.show_brightness_control, true);
+    assert.equal(dimmable?.show_color_temp_control, true);
+    assert.equal(dimmable?.show_color_control, true);
+    assert.equal(dimmable?.icon_tap_action, undefined);
+    assert.equal(dimmable?.tap_action, undefined);
+  });
+
+  it("keeps every brightness, color, and color-temperature mode on the light card", () => {
+    for (const mode of ["brightness", "color_temp", "hs", "xy", "rgb", "rgbw", "rgbww", "white"]) {
+      const entity = `light.${mode}`;
+      const cards = buildPopupCards(
+        { ...emptySections(), lights: [entity] },
+        { [entity]: state(entity, "on", { supported_color_modes: [mode] }) },
+      );
+      const card = cards.find((item) => item.entity === entity);
+      assert.equal(card?.type, "custom:area-card-mushroom-light-card", mode);
+      assert.equal(card?.show_brightness_control, true, mode);
+    }
   });
 
   it("hides the lights sub-button when no lights remain and toggles the whole set", () => {

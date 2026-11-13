@@ -1,4 +1,4 @@
-import type { AreaSections } from "./sections";
+import type { AreaSections, EntityState } from "./sections";
 import { areaHash, BUBBLE_CARD_TYPE, mushroomCardType } from "./tags";
 
 const FULL = { columns: 12 };
@@ -8,6 +8,7 @@ export function buildPopupConfig(
   name: string,
   icon: string,
   sections: AreaSections,
+  states: Record<string, EntityState> = {},
 ): Record<string, unknown> {
   return {
     type: BUBBLE_CARD_TYPE,
@@ -17,11 +18,14 @@ export function buildPopupConfig(
     icon,
     bg_blur: 15,
     background_update: true,
-    cards: buildPopupCards(sections),
+    cards: buildPopupCards(sections, states),
   };
 }
 
-export function buildPopupCards(sections: AreaSections): Record<string, unknown>[] {
+export function buildPopupCards(
+  sections: AreaSections,
+  states: Record<string, EntityState> = {},
+): Record<string, unknown>[] {
   const cards: Record<string, unknown>[] = [];
   const add = (title: string, body: Record<string, unknown>[]) => {
     if (body.length === 0) return;
@@ -44,16 +48,7 @@ export function buildPopupCards(sections: AreaSections): Record<string, unknown>
 
   add(
     "Lights",
-    sections.lights.map((entity) => ({
-      type: mushroomCardType("light-card"),
-      entity,
-      use_light_color: true,
-      show_brightness_control: true,
-      show_color_temp_control: true,
-      show_color_control: true,
-      collapsible_controls: true,
-      grid_options: FULL,
-    })),
+    sections.lights.map((entity) => lightCard(entity, states[entity])),
   );
 
   add(
@@ -144,6 +139,61 @@ export function buildPopupCards(sections: AreaSections): Record<string, unknown>
   );
 
   return cards;
+}
+
+const LIGHT_CONTROL_MODES = new Set([
+  "brightness",
+  "color_temp",
+  "hs",
+  "xy",
+  "rgb",
+  "rgbw",
+  "rgbww",
+  "white",
+]);
+
+/** True when Mushroom's light card would show a brightness, color, or color-temp control. */
+export function lightExposesControls(state: EntityState | undefined): boolean {
+  const modes = state?.attributes?.supported_color_modes;
+  if (!Array.isArray(modes)) return false;
+  return modes.some((mode) => typeof mode === "string" && LIGHT_CONTROL_MODES.has(mode));
+}
+
+function lightCard(entity: string, state: EntityState | undefined): Record<string, unknown> {
+  if (lightExposesControls(state)) {
+    return {
+      type: mushroomCardType("light-card"),
+      entity,
+      use_light_color: true,
+      show_brightness_control: true,
+      show_color_temp_control: true,
+      show_color_control: true,
+      collapsible_controls: true,
+      grid_options: FULL,
+    };
+  }
+  // The light card binds one action to the whole row. The template card splits
+  // icon tap from the rest of the row and still renders a Mushroom row.
+  return {
+    type: mushroomCardType("template-card"),
+    entity,
+    entity_id: entity,
+    primary: `{{ state_attr('${entity}', 'friendly_name') }}`,
+    secondary: `{{ states('${entity}') | title }}`,
+    icon: `{{ state_attr('${entity}', 'icon') or 'mdi:lightbulb' }}`,
+    icon_color: `{{ 'amber' if is_state('${entity}', 'on') else 'grey' }}`,
+    tap_action: { action: "more-info" },
+    hold_action: { action: "more-info" },
+    double_tap_action: { action: "none" },
+    icon_tap_action: {
+      action: "perform-action",
+      perform_action: "light.toggle",
+      target: { entity_id: entity },
+    },
+    icon_hold_action: { action: "more-info" },
+    icon_double_tap_action: { action: "none" },
+    grid_options: FULL,
+  };
 }
 
 function titleCard(title: string): Record<string, unknown> {
