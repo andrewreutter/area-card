@@ -141,7 +141,9 @@ export function rollupDotClass(rollup: SectionRollup): string {
 
 export function rollupDotStyles(rollups: SectionRollup[]): string {
   const shape = [
+    '.bubble-sub-button[class*="area-dot-"].hidden,',
     '.bubble-sub-button[class*="area-dot-"] {',
+    "  display: flex !important;",
     "  width: 14px !important;",
     "  min-width: 14px !important;",
     "  max-width: 14px !important;",

@@ -18,8 +18,9 @@ export function buildButtonConfig(input: ButtonConfigInput): Record<string, unkn
   };
   const rollups = sectionRollups(input.sections, input.states ?? {});
   const subButtons = rollups.map((rollup) => ({
+    icon: "mdi:circle",
     show_name: false,
-    show_icon: false,
+    show_icon: true,
     show_background: false,
     css_class: rollupDotClass(rollup),
     tap_action: navigate,
