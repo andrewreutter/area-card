@@ -1,4 +1,4 @@
-import { rollupDotClass, rollupDotStyles, sectionRollups } from "./rollups";
+import { emptyRollupDotClass, ROLLUP_ORDER, rollupDotClass, rollupDotStyles, sectionRollups } from "./rollups";
 import type { AreaSections, EntityState } from "./sections";
 import { areaHash, BUBBLE_CARD_TYPE } from "./tags";
 
@@ -17,16 +17,32 @@ export function buildButtonConfig(input: ButtonConfigInput): Record<string, unkn
     navigation_path: hash,
   };
   const rollups = sectionRollups(input.sections, input.states ?? {});
-  const subButtons = rollups.map((rollup) => ({
-    icon: "mdi:circle",
-    show_name: false,
-    show_icon: true,
-    show_background: false,
-    css_class: rollupDotClass(rollup),
-    tap_action: navigate,
-    hold_action: { action: "none" },
-    double_tap_action: { action: "none" },
-  }));
+  const byId = new Map(rollups.map((rollup) => [rollup.id, rollup]));
+  const subButtons = ROLLUP_ORDER.map((id) => {
+    const rollup = byId.get(id);
+    if (!rollup) {
+      return {
+        icon: "mdi:circle",
+        show_name: false,
+        show_icon: true,
+        show_background: false,
+        css_class: emptyRollupDotClass(id),
+        tap_action: { action: "none" },
+        hold_action: { action: "none" },
+        double_tap_action: { action: "none" },
+      };
+    }
+    return {
+      icon: "mdi:circle",
+      show_name: false,
+      show_icon: true,
+      show_background: false,
+      css_class: rollupDotClass(rollup),
+      tap_action: navigate,
+      hold_action: { action: "none" },
+      double_tap_action: { action: "none" },
+    };
+  });
 
   const config: Record<string, unknown> = {
     type: BUBBLE_CARD_TYPE,
@@ -41,7 +57,7 @@ export function buildButtonConfig(input: ButtonConfigInput): Record<string, unkn
       double_tap_action: { action: "none" },
     },
     sub_button: subButtons,
+    styles: rollupDotStyles(rollups),
   };
-  if (rollups.length > 0) config.styles = rollupDotStyles(rollups);
   return config;
 }

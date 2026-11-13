@@ -7,6 +7,7 @@ import { sectionRollups } from "../src/rollups";
 import {
   classifyArea,
   emptySections,
+  type AreaEntry,
   type AreaSections,
   type ClassifierHass,
   type DeviceEntry,
@@ -18,6 +19,7 @@ interface Fixture {
   entities?: RegistryEntry[];
   devices?: DeviceEntry[];
   states?: Record<string, EntityState>;
+  areas?: Record<string, AreaEntry>;
 }
 
 function state(entityId: string, value: string, attributes: Record<string, unknown> = {}): EntityState {
@@ -36,7 +38,7 @@ function hass(fixture: Fixture): ClassifierHass {
   }
   const devices: Record<string, DeviceEntry> = {};
   for (const device of fixture.devices ?? []) devices[device.id] = device;
-  return { entities, devices, states };
+  return { entities, devices, states, areas: fixture.areas };
 }
 
 describe("classifyArea", () => {
@@ -206,24 +208,101 @@ describe("classifyArea", () => {
     assert.deepEqual(result.selects, ["input_select.scene"]);
   });
 
-  it("includes only automations assigned to the area", () => {
+  it("includes an automation assigned to the area or its device", () => {
     const result = classifyArea(
       hass({
+        areas: roomAreas,
+        devices: [{ id: "bed-device", area_id: "bedroom" }],
         entities: [
           { entity_id: "automation.bedtime", area_id: "bedroom" },
-          { entity_id: "automation.master_bedroom_name_only", area_id: "kitchen" },
+          { entity_id: "automation.on_device", device_id: "bed-device" },
+          { entity_id: "automation.kitchen_only", area_id: "kitchen" },
           { entity_id: "media_player.tv", area_id: "bedroom" },
         ],
         states: {
-          "automation.master_bedroom_name_only": state("automation.master_bedroom_name_only", "on", {
-            friendly_name: "Master Bedroom lights",
-          }),
+          "automation.bedtime": state("automation.bedtime", "on", { friendly_name: "Bedtime" }),
+          "automation.on_device": state("automation.on_device", "off", { friendly_name: "Lamp routine" }),
+          "automation.kitchen_only": state("automation.kitchen_only", "on", { friendly_name: "Kitchen lights" }),
         },
       }),
       "bedroom",
     );
-    assert.deepEqual(result.automations, ["automation.bedtime"]);
+    assert.deepEqual(result.automations, ["automation.bedtime", "automation.on_device"]);
     assert.deepEqual(result.mediaPlayers, ["media_player.tv"]);
+  });
+
+  it("includes an automation whose name contains the room name", () => {
+    const lights = "automation.man_cave_lights";
+    const tv = "automation.turn_on_man_cave_tv";
+    const assigned = "automation.also_assigned";
+    const result = classifyArea(
+      hass({
+        areas: roomAreas,
+        entities: [
+          { entity_id: lights, area_id: "kitchen" },
+          { entity_id: tv },
+          { entity_id: assigned, area_id: "office_of_drew" },
+          { entity_id: "automation.hidden_match", area_id: "kitchen", hidden_by: "user" },
+        ],
+        states: {
+          [lights]: state(lights, "on", { friendly_name: "Man Cave Lights" }),
+          [tv]: state(tv, "off", { friendly_name: "Turn on man cave TV" }),
+          [assigned]: state(assigned, "on", { friendly_name: "Man Cave Lights" }),
+          "automation.hidden_match": state("automation.hidden_match", "on", { friendly_name: "Man Cave hidden" }),
+        },
+      }),
+      "office_of_drew",
+    );
+    assert.deepEqual(result.automations, [assigned, lights, tv]);
+
+    const states = {
+      [lights]: state(lights, "on", { friendly_name: "Man Cave · Occupied · Turn on Lights" }),
+      [tv]: state(tv, "off", { friendly_name: "Turn on man cave TV" }),
+      [assigned]: state(assigned, "on", { friendly_name: "Man Cave Lights" }),
+    };
+    const rollup = sectionRollups(result, states).find((item) => item.id === "automations");
+    assert.equal(rollup && `${rollup.active}/${rollup.total} ${rollup.word}`, "2/3 On");
+    const cards = buildPopupCards(
+      { ...emptySections(), automations: [lights] },
+      { [lights]: states[lights] },
+      "Man Cave",
+    );
+    const row = cards.find((card) => card.entity === lights);
+    assert.equal(row?.primary, "Occupied · Turn on Lights");
+    assert.equal((row?.hold_action as { perform_action?: string }).perform_action, "automation.toggle");
+    assert.deepEqual(
+      cards.filter((card) => card.title).map((card) => card.title),
+      ["Status", "Automations"],
+    );
+  });
+
+  it("excludes an automation for a different room", () => {
+    const fixture = hass({
+      areas: roomAreas,
+      entities: [
+        { entity_id: "automation.guest", area_id: "guest_bedroom" },
+        { entity_id: "automation.cave_word" },
+        { entity_id: "automation.man_word" },
+        { entity_id: "automation.master" },
+        { entity_id: "automation.closet", area_id: "bedroom_closet" },
+        { entity_id: "automation.bedroom_motion", area_id: "cabin_bedroom" },
+      ],
+      states: {
+        "automation.guest": state("automation.guest", "on", { friendly_name: "Guest Bedroom Lights" }),
+        "automation.cave_word": state("automation.cave_word", "on", { friendly_name: "Cave Lights" }),
+        "automation.man_word": state("automation.man_word", "on", { friendly_name: "Man Lights" }),
+        "automation.master": state("automation.master", "on", { friendly_name: "Master Bedroom Lights" }),
+        "automation.closet": state("automation.closet", "on", { friendly_name: "Bedroom Closet · Door Closed" }),
+        "automation.bedroom_motion": state("automation.bedroom_motion", "on", {
+          friendly_name: "Bedroom · Motion · Turn on Overhead",
+        }),
+      },
+    });
+    assert.deepEqual(classifyArea(fixture, "office_of_drew").automations, []);
+    assert.deepEqual(classifyArea(fixture, "bedroom").automations, ["automation.master"]);
+    assert.deepEqual(classifyArea(fixture, "guest_bedroom").automations, ["automation.guest"]);
+    assert.deepEqual(classifyArea(fixture, "bedroom_closet").automations, ["automation.closet"]);
+    assert.deepEqual(classifyArea(fixture, "cabin_bedroom").automations, ["automation.bedroom_motion"]);
   });
 
   it("rolls up a same-device pressure sensor that has no device class", () => {
@@ -379,7 +458,7 @@ describe("popup and button configs", () => {
     }
   });
 
-  it("draws one collapsed dot per rollup and does not toggle from the dot", () => {
+  it("reserves a fixed dot slot for every section and hides empty ones", () => {
     const lights = ["light.a", "light.b", "light.c", "light.d"];
     const sections = { ...emptySections(), lights };
     const offStates = Object.fromEntries(lights.map((id) => [id, state(id, "off")]));
@@ -399,21 +478,112 @@ describe("popup and button configs", () => {
       sections,
       states: onStates,
     });
+    const other = buildButtonConfig({
+      areaId: "office_of_drew",
+      name: "Man Cave",
+      icon: "mdi:office-building",
+      sections: {
+        ...emptySections(),
+        climate: ["sensor.temp"],
+        openings: ["binary_sensor.door"],
+        selects: ["input_select.scene"],
+        helpers: ["timer.nap"],
+      },
+      states: {
+        "sensor.temp": state("sensor.temp", "21", { device_class: "temperature" }),
+        "binary_sensor.door": state("binary_sensor.door", "off"),
+        "input_select.scene": state("input_select.scene", "movie"),
+        "timer.nap": state("timer.nap", "idle"),
+      },
+    });
     const offDots = inactive.sub_button as Array<Record<string, unknown>>;
     const onDots = active.sub_button as Array<Record<string, unknown>>;
-    assert.deepEqual(offDots.map((dot) => dot.css_class), ["area-dot-lights-off"]);
-    assert.deepEqual(onDots.map((dot) => dot.css_class), ["area-dot-lights-on"]);
-    assert.equal(String(inactive.styles).includes("transparent"), true);
-    assert.equal(String(active.styles).includes("rgb(255, 193, 7)"), true);
+    const otherDots = other.sub_button as Array<Record<string, unknown>>;
+    const expectedOff = DOT_SLOTS.map((id) => (id === "lights" ? "area-dot-lights-off" : `area-dot-${id}-empty`));
+    const expectedOn = DOT_SLOTS.map((id) => (id === "lights" ? "area-dot-lights-on" : `area-dot-${id}-empty`));
+    const expectedOther = DOT_SLOTS.map((id) => (id === "openings" ? "area-dot-openings-off" : `area-dot-${id}-empty`));
+    assert.deepEqual(offDots.map((dot) => dot.css_class), expectedOff);
+    assert.deepEqual(onDots.map((dot) => dot.css_class), expectedOn);
+    assert.deepEqual(otherDots.map((dot) => dot.css_class), expectedOther);
+    assert.equal(offDots.length, otherDots.length);
+
+    const styles = String(inactive.styles);
+    assert.match(styles, /opacity: 0 !important/);
+    assert.match(styles, /visibility: hidden !important/);
+    assert.match(styles, /pointer-events: none !important/);
+    assert.match(styles, /width: 14px !important/);
+    const emptyRule = styles.slice(styles.indexOf('[class*="-empty"]'));
+    assert.equal(emptyRule.includes("display: none"), false);
+    assert.equal(styles.includes("background: rgb(255, 193, 7)"), false);
+    assert.equal(String(active.styles).includes("background: rgb(255, 193, 7)"), true);
+    assert.equal(styles.includes("box-shadow: inset 0 0 0 1.5px rgb(255, 193, 7)"), true);
+
+    const emptyDot = offDots[0];
+    assert.deepEqual(emptyDot?.tap_action, { action: "none" });
+    assert.equal(JSON.stringify(emptyDot).includes("light.toggle"), false);
+    assert.equal(JSON.stringify(emptyDot).includes("automation.toggle"), false);
     assert.equal(JSON.stringify(onDots).includes("light.toggle"), false);
     assert.equal(JSON.stringify(onDots).includes("perform-action"), false);
-    const tap = onDots[0]?.tap_action as { navigation_path: string };
+    const lightsDot = onDots[DOT_SLOTS.indexOf("lights")];
+    const tap = lightsDot?.tap_action as { navigation_path: string };
     assert.equal(tap.navigation_path, "#area-bedroom");
     assert.equal(active.name, "Master Bedroom");
     assert.equal(JSON.stringify(active).includes("custom:bubble-card"), false);
     assert.equal(String(active.type), "custom:area-card-bubble");
+
+    const sparseSections = {
+      ...emptySections(),
+      climate: ["sensor.temp"],
+      openings: ["binary_sensor.door"],
+      selects: ["input_select.scene"],
+      helpers: ["timer.nap"],
+    };
+    const sparseStates = {
+      "sensor.temp": state("sensor.temp", "21", { device_class: "temperature", friendly_name: "Man Cave Temperature" }),
+      "binary_sensor.door": state("binary_sensor.door", "off"),
+      "input_select.scene": state("input_select.scene", "movie"),
+      "timer.nap": state("timer.nap", "idle"),
+    };
+    const sparseDots = (
+      buildButtonConfig({
+        areaId: "office_of_drew",
+        name: "Man Cave",
+        icon: "mdi:office-building",
+        sections: sparseSections,
+        states: sparseStates,
+      }).sub_button as Array<Record<string, unknown>>
+    ).map((dot) => dot.css_class);
+    assert.deepEqual(
+      sparseDots,
+      DOT_SLOTS.map((id) => (id === "openings" ? "area-dot-openings-off" : `area-dot-${id}-empty`)),
+    );
+    const sparseCards = buildPopupCards(sparseSections, sparseStates, "Man Cave");
+    assert.deepEqual(
+      sparseCards.filter((card) => card.title).map((card) => card.title),
+      ["Status", "Climate", "Doors and windows", "Helpers"],
+    );
   });
 });
+
+const DOT_SLOTS = [
+  "climate",
+  "lights",
+  "media",
+  "switches",
+  "occupancy",
+  "openings",
+  "satellites",
+  "helpers",
+  "automations",
+] as const;
+
+const roomAreas: Record<string, { area_id: string; name: string }> = {
+  office_of_drew: { area_id: "office_of_drew", name: "Man Cave" },
+  bedroom: { area_id: "bedroom", name: "Master Bedroom" },
+  cabin_bedroom: { area_id: "cabin_bedroom", name: "Bedroom" },
+  guest_bedroom: { area_id: "guest_bedroom", name: "Guest Bedroom" },
+  bedroom_closet: { area_id: "bedroom_closet", name: "Bedroom Closet" },
+};
 
 function listedIds(sections: AreaSections): string[] {
   return [
@@ -657,6 +827,7 @@ describe("stripRoomName", () => {
     assert.equal(stripRoomName("Master Bedroom — Under Bed Light Strip", "Master Bedroom"), "Under Bed Light Strip");
     assert.equal(stripRoomName("Master Bedroom Reading Lamp", "Master Bedroom"), "Reading Lamp");
     assert.equal(stripRoomName("Man Cave Doors are Correct", "Man Cave"), "Doors are Correct");
+    assert.equal(stripRoomName("Man Cave · Occupied · Turn on Lights", "Man Cave"), "Occupied · Turn on Lights");
   });
 
   it("leaves unrelated titles, the exact room name, and the header alone", () => {

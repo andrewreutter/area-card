@@ -1,15 +1,22 @@
 import type { AreaSections, EntityState } from "./sections";
 
-export type RollupId =
-  | "climate"
-  | "lights"
-  | "media"
-  | "switches"
-  | "occupancy"
-  | "openings"
-  | "satellites"
-  | "helpers"
-  | "automations";
+export const ROLLUP_ORDER = [
+  "climate",
+  "lights",
+  "media",
+  "switches",
+  "occupancy",
+  "openings",
+  "satellites",
+  "helpers",
+  "automations",
+] as const;
+
+export type RollupId = (typeof ROLLUP_ORDER)[number];
+
+export function emptyRollupDotClass(id: RollupId): string {
+  return `area-dot-${id}-empty`;
+}
 
 export interface SectionRollup {
   id: RollupId;
@@ -164,6 +171,15 @@ export function rollupDotStyles(rollups: SectionRollup[]): string {
     "  display: none !important;",
     "}",
   ];
+  const empty = [
+    '.bubble-sub-button[class*="area-dot-"][class*="-empty"] {',
+    "  opacity: 0 !important;",
+    "  visibility: hidden !important;",
+    "  pointer-events: none !important;",
+    "  background: transparent !important;",
+    "  box-shadow: none !important;",
+    "}",
+  ];
   const colors = rollups.map((rollup) => {
     const cls = `.bubble-sub-button.${rollupDotClass(rollup)}`;
     if (rollup.active > 0) {
@@ -171,7 +187,7 @@ export function rollupDotStyles(rollups: SectionRollup[]): string {
     }
     return `${cls} { background: transparent !important; box-shadow: inset 0 0 0 1.5px ${rollup.color} !important; }`;
   });
-  return [...shape, ...colors].join("\n");
+  return [...shape, ...empty, ...colors].join("\n");
 }
 
 function isOnOffEntity(entityId: string): boolean {

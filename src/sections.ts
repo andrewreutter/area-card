@@ -1,3 +1,5 @@
+import { matchesRoomPhrase } from "./names";
+
 export interface RegistryEntry {
   entity_id: string;
   area_id?: string | null;
@@ -198,6 +200,8 @@ export function classifyArea(hass: ClassifierHass, areaId: string): AreaSections
     }
   }
 
+  appendNamedAutomations(hass, areaId, allEntries, states, sections);
+
   sections.climate = sortIds(sections.climate, states);
   sections.lights = sortIds(sections.lights, states);
   sections.mediaPlayers = sortIds(sections.mediaPlayers, states);
@@ -235,6 +239,31 @@ export function membershipKey(areaId: string, name: string, icon: string, sectio
     sections.selects.join(","),
     sections.automations.join(","),
   ].join("|");
+}
+
+function appendNamedAutomations(
+  hass: ClassifierHass,
+  areaId: string,
+  allEntries: RegistryEntry[],
+  states: Record<string, EntityState>,
+  sections: AreaSections,
+): void {
+  const roomName = hass.areas?.[areaId]?.name;
+  if (typeof roomName !== "string" || roomName.trim() === "") return;
+  const areaNames = Object.values(hass.areas ?? {})
+    .map((area) => area?.name ?? "")
+    .filter((name) => name.trim() !== "");
+  const seen = new Set(sections.automations);
+  for (const entry of allEntries) {
+    const id = entry.entity_id;
+    if (!id.startsWith("automation.")) continue;
+    if (seen.has(id)) continue;
+    if (!states[id] || isHidden(entry)) continue;
+    const name = friendlyName(states[id]);
+    if (!name || !matchesRoomPhrase(name, roomName, areaNames)) continue;
+    sections.automations.push(id);
+    seen.add(id);
+  }
 }
 
 function registryEntries(hass: ClassifierHass): RegistryEntry[] {
