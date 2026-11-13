@@ -1,7 +1,21 @@
+import { loadDisabledAutomations } from "./automations";
+import { hideAreaDotTooltip, showAreaDotTooltip } from "./dot-tooltip";
 import { browserStorage, floorRuntimeConfig, readFloorExpanded, writeFloorExpanded } from "./floor-state";
 import { areasOnFloor, floorDisplay, type AreaRef } from "./floors";
-import { ROLLUP_ORDER, sectionHasEntities, type RollupId } from "./rollups";
-import { classifyArea, type ClassifierHass } from "./sections";
+import {
+  DOT_GAP_PX,
+  DOT_ICON_PX,
+  DOT_PX,
+  FLOOR_CHEVRON_PX,
+  floorDotRow,
+  ROLLUP_ORDER,
+  sectionHasEntities,
+  sectionRollups,
+  withoutSections,
+  type FloorDot,
+  type RollupId,
+} from "./rollups";
+import { classifyArea, type AreaSections, type ClassifierHass } from "./sections";
 
 interface FloorCardConfig {
   floor: string;
@@ -29,6 +43,9 @@ class FloorCard extends HTMLElement {
   private _expanded = true;
   private headerEl?: HTMLElement;
   private bodyEl?: HTMLElement;
+  private dotsEl?: HTMLElement;
+  private dotsStructure = "";
+  private fitObserver?: ResizeObserver;
   private areaEls = new Map<string, AreaCardElement>();
   private renderedFloor?: string;
   private renderedAreas?: string;
@@ -74,6 +91,10 @@ class FloorCard extends HTMLElement {
       this.bodyEl?.remove();
       this.headerEl = undefined;
       this.bodyEl = undefined;
+      this.dotsEl = undefined;
+      this.dotsStructure = "";
+      this.fitObserver?.disconnect();
+      this.fitObserver = undefined;
       this.areaEls.clear();
       this.renderedFloor = undefined;
       this.renderedAreas = undefined;
@@ -95,6 +116,11 @@ class FloorCard extends HTMLElement {
   connectedCallback(): void {
     this.style.display = "block";
     this.schedule();
+  }
+
+  disconnectedCallback(): void {
+    this.fitObserver?.disconnect();
+    this.fitObserver = undefined;
   }
 
   private schedule(): void {
@@ -124,9 +150,21 @@ class FloorCard extends HTMLElement {
     const floorId = this._config.floor;
     const { name, icon } = floorDisplay(hass, floorId);
     const areas = areasOnFloor(hass, floorId);
+    const classified = areas.map((area) => classifyArea(hass, area.areaId));
+    const hideList = computeFloorHide(classified);
+    const slots = ROLLUP_ORDER.filter((id) => !hideList.includes(id));
+    const groups = await Promise.all(
+      classified.map(async (sections) => {
+        const visible = withoutSections(sections, hideList);
+        const disabled = await loadDisabledAutomations(hass, visible.automations);
+        return sectionRollups(visible, hass.states ?? {}, disabled);
+      }),
+    );
+    if (this._hass !== hass || this._config?.floor !== floorId) return;
+
     const areasKey = areas.map((a) => a.areaId).join(",");
-    const hideList = computeFloorHide(hass, areas);
     const hideKey = hideList.join(",");
+    const dots = floorDotRow(slots, groups);
 
     // Build the fixed chrome on first render
     if (!this.headerEl) {
@@ -146,6 +184,8 @@ class FloorCard extends HTMLElement {
 
     // Keep chevron in sync with collapse state
     this.syncChevron();
+    this.syncDots(dots);
+    this.watchHeaderWidth();
 
     this.syncBody();
 
@@ -181,7 +221,7 @@ class FloorCard extends HTMLElement {
       "box-sizing:border-box",
       "height:calc(var(--row-height, 44px) * 0.8 + var(--row-gap, 8px) * (0.8 - 1))",
       "background:none",
-      "overflow:visible",
+      "overflow:hidden",
       "cursor:pointer",
       "user-select:none",
       "color:var(--primary-text-color)",
@@ -214,7 +254,8 @@ class FloorCard extends HTMLElement {
     nameEl.textContent = name;
     nameEl.style.cssText = [
       "display:block",
-      "margin:0 30px 0 " + (icon ? "0" : "16px"),
+      "flex:0 0 auto",
+      "margin:0 12px 0 " + (icon ? "0" : "16px"),
       "padding:0",
       "min-width:0",
       "font-family:inherit",
@@ -230,13 +271,27 @@ class FloorCard extends HTMLElement {
     const lineEl = document.createElement("div");
     lineEl.className = "floor-card-line";
     lineEl.style.cssText = [
-      "flex:1 1 auto",
+      "flex:1 1 0",
+      "min-width:0",
       "height:6px",
-      "margin:0 14px 0 0",
+      `margin:0 ${DOT_GAP_PX}px 0 0`,
       "border-radius:6px",
       "opacity:0.6",
       "background-color:var(--bubble-line-background-color, var(--ha-card-background-color, var(--secondary-background-color)))",
     ].join(";");
+
+    this.dotsEl = document.createElement("div");
+    this.dotsEl.className = "floor-card-dots";
+    this.dotsEl.style.cssText = [
+      "display:flex",
+      "align-items:center",
+      "justify-content:flex-end",
+      "flex:0 1 auto",
+      "min-width:0",
+      "overflow:hidden",
+      `gap:${DOT_GAP_PX}px`,
+    ].join(";");
+    this.dotsStructure = "";
 
     const chevronWrap = document.createElement("div");
     chevronWrap.className = "floor-card-chevron";
@@ -246,9 +301,9 @@ class FloorCard extends HTMLElement {
       "justify-content:center",
       "flex:0 0 auto",
       "box-sizing:border-box",
-      "width:36px",
-      "height:36px",
-      "margin-left:8px",
+      `width:${FLOOR_CHEVRON_PX}px`,
+      `height:${FLOOR_CHEVRON_PX}px`,
+      `margin-left:${DOT_GAP_PX}px`,
       "border-radius:18px",
       "background-color:var(--bubble-icon-background-color, rgba(255, 255, 255, 0.7))",
       "--mdc-icon-size:20px",
@@ -259,7 +314,105 @@ class FloorCard extends HTMLElement {
     chevronEl.setAttribute("icon", this.chevronIcon());
     chevronWrap.append(chevronEl);
 
-    header.append(nameEl, lineEl, chevronWrap);
+    header.append(nameEl, lineEl, this.dotsEl, chevronWrap);
+  }
+
+  private syncDots(dots: FloorDot[]): void {
+    const row = this.dotsEl;
+    if (!row) return;
+    const live = dots.some((dot) => dot.state !== "empty");
+    row.style.display = live ? "flex" : "none";
+    if (!live) {
+      if (row.childElementCount) row.replaceChildren();
+      this.dotsStructure = "";
+      return;
+    }
+    const structure = dots.map((dot) => `${dot.id}:${dot.state}`).join(",");
+    if (structure !== this.dotsStructure || row.childElementCount !== dots.length) {
+      this.dotsStructure = structure;
+      row.replaceChildren(...dots.map((dot) => this.makeDot(dot)));
+    } else {
+      dots.forEach((dot, index) => {
+        const el = row.children[index];
+        if (el instanceof HTMLElement) this.paintDot(el, dot);
+      });
+    }
+    this.fitDots();
+  }
+
+  /** Keep the floor name intact and drop whole dots from the left when the row is wider than the header. */
+  private fitDots(): void {
+    const row = this.dotsEl;
+    if (!row || row.style.display === "none") return;
+    if (row.clientWidth === 0 && (this.headerEl?.clientWidth ?? 0) === 0) return;
+    row.style.flex = "0 1 auto";
+    row.style.width = "";
+    const count = row.children.length;
+    const full = count * DOT_PX + Math.max(0, count - 1) * DOT_GAP_PX;
+    const available = row.clientWidth;
+    let flex = "0 0 auto";
+    let width = "";
+    if (available < full - 0.5) {
+      const slot = DOT_PX + DOT_GAP_PX;
+      const fit = Math.max(0, Math.floor((available + DOT_GAP_PX) / slot));
+      const snapped = fit * DOT_PX + Math.max(0, fit - 1) * DOT_GAP_PX;
+      width = `${snapped}px`;
+    }
+    if (row.style.flex !== flex) row.style.flex = flex;
+    if (row.style.width !== width) row.style.width = width;
+  }
+
+  private watchHeaderWidth(): void {
+    if (!this.headerEl || this.fitObserver) return;
+    this.fitObserver = new ResizeObserver(() => this.fitDots());
+    this.fitObserver.observe(this.headerEl);
+  }
+
+  private makeDot(dot: FloorDot): HTMLElement {
+    const el = document.createElement("div");
+    el.className = "floor-card-dot";
+    el.style.cssText = [
+      "display:flex",
+      "align-items:center",
+      "justify-content:center",
+      "box-sizing:border-box",
+      `flex:0 0 ${DOT_PX}px`,
+      `width:${DOT_PX}px`,
+      `height:${DOT_PX}px`,
+      "padding:0",
+      "border-radius:50%",
+      "overflow:hidden",
+    ].join(";");
+    const icon = document.createElement("ha-icon");
+    icon.setAttribute("icon", dot.icon);
+    icon.style.cssText = [
+      "display:flex",
+      `width:${DOT_ICON_PX}px`,
+      `height:${DOT_ICON_PX}px`,
+      `--mdc-icon-size:${DOT_ICON_PX}px`,
+      "color:inherit",
+    ].join(";");
+    el.append(icon);
+    el.addEventListener("pointerenter", () => {
+      const text = el.dataset.areaTip;
+      if (!text) return;
+      showAreaDotTooltip(el, text);
+    });
+    el.addEventListener("pointerleave", hideAreaDotTooltip);
+    el.addEventListener("pointerdown", hideAreaDotTooltip);
+    this.paintDot(el, dot);
+    return el;
+  }
+
+  private paintDot(el: HTMLElement, dot: FloorDot): void {
+    if (dot.label) el.dataset.areaTip = dot.label;
+    else delete el.dataset.areaTip;
+    const empty = dot.state === "empty";
+    el.style.visibility = empty ? "hidden" : "visible";
+    el.style.pointerEvents = empty ? "none" : "auto";
+    el.style.background = dot.background;
+    el.style.color = dot.color;
+    el.style.boxShadow = dot.ring ? `inset 0 0 0 1.5px ${dot.ring}` : "none";
   }
 
   private chevronIcon(): string {
@@ -330,10 +483,9 @@ class FloorCard extends HTMLElement {
   }
 }
 
-function computeFloorHide(hass: ClassifierHass, areas: AreaRef[]): RollupId[] {
-  if (areas.length === 0) return [];
-  const sectionsList = areas.map((a) => classifyArea(hass, a.areaId));
-  return ROLLUP_ORDER.filter((id) => sectionsList.every((s) => !sectionHasEntities(id, s)));
+function computeFloorHide(sectionsList: AreaSections[]): RollupId[] {
+  if (sectionsList.length === 0) return [];
+  return ROLLUP_ORDER.filter((id) => sectionsList.every((section) => !sectionHasEntities(id, section)));
 }
 
 if (!customElements.get("floor-card")) {

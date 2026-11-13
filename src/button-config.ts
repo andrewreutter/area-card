@@ -1,5 +1,5 @@
 import { pictureBackgroundStyles } from "./picture";
-import { emptyRollupDotClass, ROLLUP_ORDER, rollupDotClass, rollupDotStyles, sectionRollups, type RollupId } from "./rollups";
+import { emptyRollupDotClass, FLOOR_CHEVRON_PX, ROLLUP_ORDER, rollupDotClass, rollupDotStyles, sectionIcon, sectionRollups, type RollupId } from "./rollups";
 import type { AreaSections, EntityState } from "./sections";
 import { areaHash, BUBBLE_CARD_TYPE } from "./tags";
 
@@ -13,6 +13,10 @@ export interface ButtonConfigInput {
   dotSlots?: readonly RollupId[];
   picture?: string | null;
   unavailable?: boolean;
+  /** Automations that cannot trigger because their devices are unavailable. */
+  disabledAutomations?: ReadonlySet<string>;
+  /** Shift the dot row left by the floor chevron so it lines up with the floor header. */
+  alignDots?: boolean;
 }
 
 /** Same treatment Bubble applies to a button whose entity is unavailable. */
@@ -34,14 +38,14 @@ export function buildButtonConfig(input: ButtonConfigInput): Record<string, unkn
     action: "navigate",
     navigation_path: hash,
   };
-  const rollups = sectionRollups(input.sections, input.states ?? {});
+  const rollups = sectionRollups(input.sections, input.states ?? {}, input.disabledAutomations);
   const byId = new Map(rollups.map((rollup) => [rollup.id, rollup]));
   const slots = input.dotSlots ?? ROLLUP_ORDER;
   const subButtons = slots.map((id) => {
     const rollup = byId.get(id);
     if (!rollup) {
       return {
-        icon: "mdi:circle",
+        icon: sectionIcon(id),
         show_name: false,
         show_icon: true,
         show_background: false,
@@ -52,7 +56,7 @@ export function buildButtonConfig(input: ButtonConfigInput): Record<string, unkn
       };
     }
     return {
-      icon: "mdi:circle",
+      icon: sectionIcon(id),
       show_name: false,
       show_icon: true,
       show_background: false,
@@ -76,7 +80,7 @@ export function buildButtonConfig(input: ButtonConfigInput): Record<string, unkn
       double_tap_action: { action: "none" },
     },
     sub_button: subButtons,
-    styles: buttonStyles(rollups, input.picture, input.unavailable),
+    styles: buttonStyles(rollups, input.picture, input.unavailable, input.alignDots),
   };
   return config;
 }
@@ -85,9 +89,20 @@ function buttonStyles(
   rollups: ReturnType<typeof sectionRollups>,
   picture: string | null | undefined,
   unavailable: boolean | undefined,
+  alignDots: boolean | undefined,
 ): string {
   const parts = [rollupDotStyles(rollups)];
+  if (alignDots) parts.push(alignDotStyles());
   if (picture) parts.push(pictureBackgroundStyles(picture, "button"));
   if (unavailable) parts.push(UNAVAILABLE_BUTTON_STYLES);
   return parts.join("\n");
+}
+
+/** Bubble already insets the row 8px. The extra margin clears the floor chevron. */
+function alignDotStyles(): string {
+  return [
+    ".bubble-sub-button-container {",
+    `  margin-inline-end: ${FLOOR_CHEVRON_PX}px !important;`,
+    "}",
+  ].join("\n");
 }

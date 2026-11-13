@@ -1,11 +1,17 @@
 import { stripRoomName } from "./names";
 import { pictureBackgroundStyles } from "./picture";
-import { rollupLabel, sectionRollups, sectionTitle } from "./rollups";
+import { rollupLabel, sectionColor, sectionIcon, sectionRollups, sectionTitle, type RollupId } from "./rollups";
 import type { AreaSections, EntityState } from "./sections";
 import { areaHash, BUBBLE_CARD_TYPE, mushroomCardType } from "./tags";
 
 const FULL = { columns: 12 };
 const LIGHT_ROW = "custom:area-card-light-row";
+const SECTION_TITLE = "custom:area-card-section-title";
+const STATUS_HEADING = {
+  title: "Status",
+  icon: "mdi:list-status",
+  color: "var(--primary-text-color)",
+};
 
 export function buildPopupConfig(
   areaId: string,
@@ -14,6 +20,7 @@ export function buildPopupConfig(
   sections: AreaSections,
   states: Record<string, EntityState> = {},
   picture?: string | null,
+  disabledAutomations: ReadonlySet<string> = new Set(),
 ): Record<string, unknown> {
   const config: Record<string, unknown> = {
     type: BUBBLE_CARD_TYPE,
@@ -23,7 +30,7 @@ export function buildPopupConfig(
     icon,
     bg_blur: 15,
     background_update: true,
-    cards: buildPopupCards(sections, states, name),
+    cards: buildPopupCards(sections, states, name, disabledAutomations),
   };
   if (picture) config.styles = pictureBackgroundStyles(picture, "popup");
   return config;
@@ -33,16 +40,17 @@ export function buildPopupCards(
   sections: AreaSections,
   states: Record<string, EntityState> = {},
   roomName = "",
+  disabledAutomations: ReadonlySet<string> = new Set(),
 ): Record<string, unknown>[] {
   const cards: Record<string, unknown>[] = [];
-  const add = (title: string, body: Record<string, unknown>[]) => {
+  const add = (id: RollupId | "status", body: Record<string, unknown>[]) => {
     if (body.length === 0) return;
-    cards.push(titleCard(title), ...body);
+    cards.push(titleCard(id), ...body);
   };
 
-  const rollups = sectionRollups(sections, states);
+  const rollups = sectionRollups(sections, states, disabledAutomations);
   add(
-    "Status",
+    "status",
     rollups.length
       ? [
           {
@@ -64,17 +72,17 @@ export function buildPopupCards(
   );
 
   add(
-    sectionTitle("climate"),
+    "climate",
     sections.climate.map((entity) => entityCard(entity, states, roomName)),
   );
 
   add(
-    sectionTitle("lights"),
+    "lights",
     sections.lights.map((entity) => withLedDot(lightCard(entity, states[entity], states, roomName), sections.lightLeds[entity])),
   );
 
   add(
-    sectionTitle("media"),
+    "media",
     sections.mediaPlayers.map((entity) =>
       named(
         {
@@ -90,7 +98,7 @@ export function buildPopupCards(
   );
 
   add(
-    sectionTitle("switches"),
+    "switches",
     sections.switches.map((entity) =>
       entityCard(entity, states, roomName, {
         tap_action: { action: "toggle" },
@@ -100,12 +108,12 @@ export function buildPopupCards(
   );
 
   add(
-    sectionTitle("occupancy"),
+    "occupancy",
     sections.occupancy.map((item) => occupancyCard(item.entityId, states, roomName, item.pressureEntityId)),
   );
 
   add(
-    sectionTitle("openings"),
+    "openings",
     sections.openings.map((entity) =>
       entity.startsWith("cover.")
         ? named(
@@ -125,7 +133,7 @@ export function buildPopupCards(
   );
 
   add(
-    sectionTitle("satellites"),
+    "satellites",
     sections.satellites.map((item) => satelliteCard(item.entityId, states, roomName, item.ledEntityId, item.alarmEntityId)),
   );
 
@@ -144,11 +152,11 @@ export function buildPopupCards(
     ),
     ...sections.helpers.map((entity) => entityCard(entity, states, roomName)),
   ];
-  add(sectionTitle("helpers"), helperCards);
+  add("helpers", helperCards);
 
   add(
-    sectionTitle("automations"),
-    sections.automations.map((entity) => automationCard(entity, states, roomName)),
+    "automations",
+    sections.automations.map((entity) => automationCard(entity, states, roomName, disabledAutomations.has(entity))),
   );
 
   return cards;
@@ -229,10 +237,15 @@ function withLedDot(card: Record<string, unknown>, ledEntityId?: string): Record
   };
 }
 
-function titleCard(title: string): Record<string, unknown> {
+function titleCard(id: RollupId | "status"): Record<string, unknown> {
+  const heading = id === "status"
+    ? STATUS_HEADING
+    : { title: sectionTitle(id), icon: sectionIcon(id), color: sectionColor(id) };
   return {
-    type: mushroomCardType("title-card"),
-    title,
+    type: SECTION_TITLE,
+    title: heading.title,
+    icon: heading.icon,
+    color: heading.color,
     grid_options: FULL,
   };
 }
@@ -307,14 +320,21 @@ function satelliteCard(
   return card;
 }
 
-function automationCard(entity: string, states: Record<string, EntityState>, roomName: string): Record<string, unknown> {
+function automationCard(
+  entity: string,
+  states: Record<string, EntityState>,
+  roomName: string,
+  disabled = false,
+): Record<string, unknown> {
   return {
     type: mushroomCardType("template-card"),
     entity,
     primary: entityTitle(entity, states, roomName),
-    secondary: `{% set lt = state_attr('${entity}', 'last_triggered') %}{{ relative_time(lt) + ' ago' if lt else 'Never triggered' }}`,
-    icon: "mdi:flash",
-    icon_color: `{{ 'green' if is_state('${entity}', 'on') else 'grey' }}`,
+    secondary: disabled
+      ? "Disabled"
+      : `{% set lt = state_attr('${entity}', 'last_triggered') %}{{ relative_time(lt) + ' ago' if lt else 'Never triggered' }}`,
+    icon: disabled ? "mdi:flash-off" : "mdi:flash",
+    icon_color: disabled ? "grey" : `{{ 'green' if is_state('${entity}', 'on') else 'grey' }}`,
     tap_action: { action: "more-info" },
     hold_action: {
       action: "perform-action",

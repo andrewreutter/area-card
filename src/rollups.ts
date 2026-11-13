@@ -26,6 +26,10 @@ export interface SectionRollup {
   color: string;
   active: number;
   total: number;
+  /** Automations that are off and can still trigger. */
+  off?: number;
+  /** Automations that will never trigger because their devices are unavailable. */
+  disabled?: number;
   word: "On" | "Open";
 }
 
@@ -101,11 +105,12 @@ const META: Record<RollupId, Omit<SectionRollup, "id" | "active" | "total">> = {
 export function sectionRollups(
   sections: AreaSections,
   states: Record<string, EntityState | undefined>,
+  disabledAutomations: ReadonlySet<string> = new Set(),
 ): SectionRollup[] {
   const rollups: SectionRollup[] = [];
-  const add = (id: RollupId, active: number, total: number) => {
+  const add = (id: RollupId, active: number, total: number, extra?: Pick<SectionRollup, "off" | "disabled">) => {
     if (total <= 0) return;
-    rollups.push({ id, ...META[id], active, total });
+    rollups.push({ id, ...META[id], active, total, ...extra });
   };
 
   const climate = sections.climate.filter(isOnOffEntity);
@@ -134,7 +139,11 @@ export function sectionRollups(
 
   const helpers = sections.helpers.filter(isOnOffEntity);
   add("helpers", countActive(helpers, states, isOn), helpers.length);
-  add("automations", countActive(sections.automations, states, isOn), sections.automations.length);
+  const automations = countAutomations(sections.automations, states, disabledAutomations);
+  add("automations", automations.on, sections.automations.length, {
+    off: automations.off,
+    disabled: automations.disabled,
+  });
   return rollups;
 }
 
@@ -142,7 +151,31 @@ export function sectionTitle(id: RollupId): string {
   return META[id].title;
 }
 
+export function sectionIcon(id: RollupId): string {
+  return META[id].icon;
+}
+
+export function sectionColor(id: RollupId): string {
+  return META[id].color;
+}
+
+/** Icon ink on a filled dot. Light fills need dark ink so the glyph stays readable. */
+export function iconInk(color: string): string {
+  const match = /^rgb\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)$/.exec(color);
+  if (!match) return "#fff";
+  const red = Number(match[1]);
+  const green = Number(match[2]);
+  const blue = Number(match[3]);
+  const luminance = (0.2126 * red + 0.7152 * green + 0.0722 * blue) / 255;
+  return luminance > 0.6 ? "#1a1a1a" : "#fff";
+}
+
 export function rollupLabel(rollup: SectionRollup): string {
+  if (rollup.id === "automations") {
+    const disabled = rollup.disabled ?? 0;
+    const off = rollup.off ?? Math.max(0, rollup.total - rollup.active - disabled);
+    return `${rollup.title} ${off} off ${rollup.active} on ${disabled} disabled`;
+  }
   return `${rollup.title} ${rollup.active}/${rollup.total} ${rollup.word}`;
 }
 
@@ -212,6 +245,68 @@ export function rollupDotClass(rollup: SectionRollup): string {
   return `area-dot-${rollup.id}-${rollup.active > 0 ? "on" : "off"}`;
 }
 
+export interface FloorDot {
+  id: RollupId;
+  state: "on" | "off" | "empty";
+  icon: string;
+  label: string | null;
+  background: string;
+  color: string;
+  ring: string | null;
+}
+
+/**
+ * One dot per slot. A slot is filled when any area has it active, hollow when
+ * the section is present but idle, and empty when no area draws that dot.
+ * Counts add across the areas that have the section.
+ */
+export function floorDotRow(
+  slots: readonly RollupId[],
+  groups: readonly (readonly SectionRollup[])[],
+): FloorDot[] {
+  const merged = new Map<RollupId, SectionRollup>();
+  for (const group of groups) {
+    for (const rollup of group) {
+      const prev = merged.get(rollup.id);
+      if (!prev) {
+        merged.set(rollup.id, { ...rollup });
+        continue;
+      }
+      prev.active += rollup.active;
+      prev.total += rollup.total;
+      if (rollup.off != null || prev.off != null) prev.off = (prev.off ?? 0) + (rollup.off ?? 0);
+      if (rollup.disabled != null || prev.disabled != null) {
+        prev.disabled = (prev.disabled ?? 0) + (rollup.disabled ?? 0);
+      }
+    }
+  }
+
+  return slots.map((id) => {
+    const rollup = merged.get(id);
+    if (!rollup) {
+      return {
+        id,
+        state: "empty",
+        icon: sectionIcon(id),
+        label: null,
+        background: "transparent",
+        color: "transparent",
+        ring: null,
+      };
+    }
+    const on = rollup.active > 0;
+    return {
+      id,
+      state: on ? "on" : "off",
+      icon: sectionIcon(id),
+      label: rollupLabel(rollup),
+      background: on ? rollup.color : "transparent",
+      color: on ? iconInk(rollup.color) : rollup.color,
+      ring: on ? null : rollup.color,
+    };
+  });
+}
+
 /**
  * Collapsed button chrome. Bubble clears ha-card's shadow inline and paints
  * the pill from these variables. An unset --ha-card-border-radius leaves
@@ -227,29 +322,40 @@ const COLLAPSED_BUTTON_THEME_STYLES = [
   "}",
 ].join("\n");
 
+export const DOT_PX = 22;
+export const DOT_ICON_PX = 14;
+export const DOT_GAP_PX = 8;
+/** Floor header collapse control. Area dots inside a floor shift left by this width. */
+export const FLOOR_CHEVRON_PX = 36;
+
 export function rollupDotStyles(rollups: SectionRollup[]): string {
   const shape = [
     '.bubble-sub-button[class*="area-dot-"].hidden,',
     '.bubble-sub-button[class*="area-dot-"] {',
     "  display: flex !important;",
-    "  width: 14px !important;",
-    "  min-width: 14px !important;",
-    "  max-width: 14px !important;",
-    "  height: 14px !important;",
-    "  min-height: 14px !important;",
+    "  align-items: center !important;",
+    "  justify-content: center !important;",
+    `  width: ${DOT_PX}px !important;`,
+    `  min-width: ${DOT_PX}px !important;`,
+    `  max-width: ${DOT_PX}px !important;`,
+    `  height: ${DOT_PX}px !important;`,
+    `  min-height: ${DOT_PX}px !important;`,
     "  padding: 0 !important;",
     "  margin: 0 !important;",
     "  border: none !important;",
     "  border-radius: 50% !important;",
-    "  flex: 0 0 14px !important;",
+    `  flex: 0 0 ${DOT_PX}px !important;`,
     "  overflow: hidden !important;",
-    "  color: transparent !important;",
-    "  --bubble-sub-button-height: 14px;",
+    `  --bubble-sub-button-height: ${DOT_PX}px;`,
     "}",
-    '.bubble-sub-button[class*="area-dot-"] .bubble-sub-button-icon,',
-    '.bubble-sub-button[class*="area-dot-"] ha-icon,',
     '.bubble-sub-button[class*="area-dot-"] .bubble-sub-button-name-container {',
     "  display: none !important;",
+    "}",
+    '.bubble-sub-button[class*="area-dot-"] .bubble-sub-button-icon,',
+    '.bubble-sub-button[class*="area-dot-"] ha-icon {',
+    "  display: flex !important;",
+    `  --mdc-icon-size: ${DOT_ICON_PX}px;`,
+    "  color: inherit !important;",
     "}",
   ];
   const empty = [
@@ -264,9 +370,9 @@ export function rollupDotStyles(rollups: SectionRollup[]): string {
   const colors = rollups.map((rollup) => {
     const cls = `.bubble-sub-button.${rollupDotClass(rollup)}`;
     if (rollup.active > 0) {
-      return `${cls} { background: ${rollup.color} !important; box-shadow: none !important; }`;
+      return `${cls} { background: ${rollup.color} !important; box-shadow: none !important; color: ${iconInk(rollup.color)} !important; }`;
     }
-    return `${cls} { background: transparent !important; box-shadow: inset 0 0 0 1.5px ${rollup.color} !important; }`;
+    return `${cls} { background: transparent !important; box-shadow: inset 0 0 0 1.5px ${rollup.color} !important; color: ${rollup.color} !important; }`;
   });
   return [COLLAPSED_BUTTON_THEME_STYLES, ...shape, ...empty, ...colors].join("\n");
 }
@@ -286,6 +392,25 @@ function isMediaOn(_entityId: string, value: string): boolean {
 function isOpeningActive(entityId: string, value: string): boolean {
   if (entityId.startsWith("cover.")) return value === "open" || value === "opening";
   return value === "on";
+}
+
+function countAutomations(
+  ids: string[],
+  states: Record<string, EntityState | undefined>,
+  disabledAutomations: ReadonlySet<string>,
+): { on: number; off: number; disabled: number } {
+  let on = 0;
+  let off = 0;
+  let disabled = 0;
+  for (const id of ids) {
+    if (disabledAutomations.has(id)) {
+      disabled += 1;
+      continue;
+    }
+    if ((states[id]?.state ?? "") === "on") on += 1;
+    else off += 1;
+  }
+  return { on, off, disabled };
 }
 
 function countActive(

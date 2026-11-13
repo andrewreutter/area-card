@@ -2,6 +2,8 @@ import { matchesRoomPhrase } from "./names";
 
 export interface RegistryEntry {
   entity_id: string;
+  /** Entity registry id. Device triggers store this, not the entity_id. */
+  id?: string;
   area_id?: string | null;
   device_id?: string | null;
   platform?: string | null;
@@ -24,6 +26,7 @@ export interface EntityState {
   entity_id?: string;
   state: string;
   attributes: Record<string, unknown>;
+  last_updated?: string;
 }
 
 export interface AreaEntry {
@@ -47,6 +50,7 @@ export interface ClassifierHass {
   areas?: Record<string, AreaEntry>;
   floors?: Record<string, FloorEntry>;
   hassUrl?: (path: string) => string;
+  callWS?: (message: { type: string; entity_id?: string }) => Promise<unknown>;
 }
 
 export interface OccupancyItem {
@@ -111,8 +115,13 @@ const PURE_HELPER_DOMAINS = new Set(["input_boolean", "input_select", "timer"]);
  * True when the area has device entities and every one of them is unavailable.
  * Pure helpers and template helpers that are not device entities are ignored.
  * An area with no device entities stays available.
+ * A disabled automation does not count as available, so it cannot keep the area lit.
  */
-export function areaUnavailable(hass: ClassifierHass, areaId: string): boolean {
+export function areaUnavailable(
+  hass: ClassifierHass,
+  areaId: string,
+  disabledAutomations: ReadonlySet<string> = new Set(),
+): boolean {
   const devices = deviceMap(hass.devices);
   const states = hass.states ?? {};
   const deviceEntities = registryEntries(hass).filter((entry) => {
@@ -122,7 +131,10 @@ export function areaUnavailable(hass: ClassifierHass, areaId: string): boolean {
     return isDeviceEntity(entry);
   });
   if (deviceEntities.length === 0) return false;
-  return deviceEntities.every((entry) => states[entry.entity_id]?.state === "unavailable");
+  return deviceEntities.every((entry) => {
+    if (disabledAutomations.has(entry.entity_id)) return true;
+    return states[entry.entity_id]?.state === "unavailable";
+  });
 }
 
 function resolvePicture(hass: ClassifierHass, picture: string | null | undefined): string | null {

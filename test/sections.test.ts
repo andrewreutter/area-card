@@ -6,7 +6,7 @@ import { areasOnFloor, floorDisplay } from "../src/floors";
 import { stripRoomName } from "../src/names";
 import { tooltipPosition } from "../src/dot-tooltip";
 import { buildPopupCards, buildPopupConfig } from "../src/popup-cards";
-import { dotTooltipLabel, parseHideSections, ROLLUP_ORDER, rollupLabel, sectionHasEntities, sectionRollups, sectionTitle, withoutSections, type RollupId } from "../src/rollups";
+import { dotTooltipLabel, floorDotRow, iconInk, parseHideSections, ROLLUP_ORDER, rollupLabel, sectionColor, sectionHasEntities, sectionIcon, sectionRollups, sectionTitle, withoutSections, type RollupId } from "../src/rollups";
 import {
   areaDisplay,
   areaUnavailable,
@@ -267,7 +267,7 @@ describe("classifyArea", () => {
       [assigned]: state(assigned, "on", { friendly_name: "Man Cave Lights" }),
     };
     const rollup = sectionRollups(result, states).find((item) => item.id === "automations");
-    assert.equal(rollup && `${rollup.active}/${rollup.total} ${rollup.word}`, "2/3 On");
+    assert.equal(rollup && rollupLabel(rollup), "Automations 1 off 2 on 0 disabled");
     const cards = buildPopupCards(
       { ...emptySections(), automations: [lights] },
       { [lights]: states[lights] },
@@ -404,6 +404,36 @@ describe("popup and button configs", () => {
     assert.deepEqual(cards, []);
   });
 
+  it("puts the section icon to the left of each heading", () => {
+    const cards = buildPopupCards({
+      ...emptySections(),
+      climate: ["sensor.temp"],
+      lights: ["light.a"],
+      mediaPlayers: ["media_player.tv"],
+      switches: ["switch.a"],
+      occupancy: [{ entityId: "binary_sensor.motion" }],
+      openings: ["binary_sensor.door"],
+      satellites: [{ entityId: "assist_satellite.kiosk" }],
+      helpers: ["input_boolean.a"],
+      automations: ["automation.a"],
+    });
+    const headings = cards.filter((card) => card.type === "custom:area-card-section-title");
+    assert.deepEqual(
+      headings.map((card) => [card.title, card.icon, card.color]),
+      [
+        ["Status", "mdi:list-status", "var(--primary-text-color)"],
+        ...ROLLUP_ORDER.map((id) => [sectionTitle(id), sectionIcon(id), sectionColor(id)]),
+      ],
+    );
+    assert.equal(sectionIcon("lights"), "mdi:lightbulb");
+    assert.equal(sectionIcon("openings"), "mdi:door");
+    assert.equal(iconInk("rgb(255, 193, 7)"), "#1a1a1a");
+    assert.equal(iconInk("rgb(158, 158, 158)"), "#1a1a1a");
+    assert.equal(iconInk("rgb(255, 235, 59)"), "#1a1a1a");
+    assert.equal(iconInk("rgb(33, 150, 243)"), "#fff");
+    assert.equal(iconInk("rgb(3, 169, 244)"), "#fff");
+  });
+
   it("renders only the sections that have entities, with prefixed mushroom types", () => {
     const cards = buildPopupCards(
       {
@@ -423,7 +453,12 @@ describe("popup and button configs", () => {
     assert.deepEqual(contents, ["Lights 2/2 On", "Occupancy 0/1 On"]);
     assert.equal(cards.some((card) => JSON.stringify(card).includes("sensor.bed_pressure") && card.type?.toString().includes("entity-card")), false);
     const types = cards.map((card) => String(card.type));
-    assert.ok(types.every((type) => type.startsWith("custom:area-card-mushroom-")));
+    assert.ok(
+      types.every(
+        (type) => type.startsWith("custom:area-card-mushroom-") || type === "custom:area-card-section-title",
+      ),
+    );
+    assert.ok(types.includes("custom:area-card-section-title"));
     assert.ok(types.includes("custom:area-card-mushroom-light-card"));
     assert.ok(types.includes("custom:area-card-mushroom-template-card"));
     assert.equal(types.some((type) => type.startsWith("custom:mushroom-")), false);
@@ -531,7 +566,31 @@ describe("popup and button configs", () => {
     assert.match(styles, /opacity: 0 !important/);
     assert.match(styles, /visibility: hidden !important/);
     assert.match(styles, /pointer-events: none !important/);
-    assert.match(styles, /width: 14px !important/);
+    assert.match(styles, /width: 22px !important/);
+    assert.match(styles, /--mdc-icon-size: 14px/);
+    assert.equal(styles.includes("color: transparent"), false);
+    const sectionIcons = [
+      "mdi:thermometer",
+      "mdi:lightbulb",
+      "mdi:play-circle",
+      "mdi:toggle-switch",
+      "mdi:account",
+      "mdi:door",
+      "mdi:tablet-dashboard",
+      "mdi:cog",
+      "mdi:flash",
+    ];
+    assert.deepEqual(offDots.map((dot) => dot.icon), sectionIcons);
+    assert.deepEqual(onDots.map((dot) => dot.icon), sectionIcons);
+    assert.deepEqual(otherDots.map((dot) => dot.icon), sectionIcons);
+    assert.match(
+      String(active.styles),
+      /\.bubble-sub-button\.area-dot-lights-on \{[^}]*color: #1a1a1a !important/,
+    );
+    assert.match(
+      styles,
+      /\.bubble-sub-button\.area-dot-lights-off \{[^}]*color: rgb\(255, 193, 7\) !important/,
+    );
     assert.match(styles, /:host\s*\{[^}]*--bubble-box-shadow:\s*var\(--ha-card-box-shadow\)/);
     assert.match(
       styles,
@@ -1298,6 +1357,99 @@ describe("area pictures", () => {
   });
 });
 
+describe("disabled automations", () => {
+  it("splits the tooltip into off, on, and disabled and hollows the dot when none are on", () => {
+    const motion = "automation.motion";
+    const bedtime = "automation.bedtime";
+    const away = "automation.away";
+    const sections = { ...emptySections(), automations: [motion, bedtime, away] };
+    const states = {
+      [motion]: state(motion, "on", { friendly_name: "Motion" }),
+      [bedtime]: state(bedtime, "on", { friendly_name: "Bedtime" }),
+      [away]: state(away, "off", { friendly_name: "Away" }),
+    };
+    const disabled = new Set([motion]);
+    const rollups = sectionRollups(sections, states, disabled);
+    assert.equal(rollupLabel(rollups[0]!), "Automations 1 off 1 on 1 disabled");
+    assert.equal(
+      dotTooltipLabel("bubble-sub-button area-dot-automations-on", rollups),
+      "Automations 1 off 1 on 1 disabled",
+    );
+    const filled = buildButtonConfig({
+      areaId: "bedroom",
+      name: "Bedroom",
+      icon: "mdi:bed",
+      sections,
+      states,
+      disabledAutomations: disabled,
+    }).sub_button as Array<{ css_class: string }>;
+    assert.equal(
+      filled.find((dot) => dot.css_class.includes("automations"))?.css_class,
+      "area-dot-automations-on",
+    );
+
+    const onlyDisabled = sectionRollups({ ...emptySections(), automations: [motion] }, states, disabled);
+    assert.equal(rollupLabel(onlyDisabled[0]!), "Automations 0 off 0 on 1 disabled");
+    assert.equal(onlyDisabled[0]?.active, 0);
+    const hollow = buildButtonConfig({
+      areaId: "bedroom",
+      name: "Bedroom",
+      icon: "mdi:bed",
+      sections: { ...emptySections(), automations: [motion] },
+      states,
+      disabledAutomations: disabled,
+    }).sub_button as Array<{ css_class: string }>;
+    assert.equal(
+      hollow.find((dot) => dot.css_class.includes("automations"))?.css_class,
+      "area-dot-automations-off",
+    );
+
+    const offAndDead = sectionRollups(
+      { ...emptySections(), automations: [away] },
+      states,
+      new Set([away]),
+    );
+    assert.equal(rollupLabel(offAndDead[0]!), "Automations 0 off 0 on 1 disabled");
+
+    const cards = buildPopupCards(sections, states, "Bedroom", disabled);
+    const row = cards.find((card) => card.entity === motion);
+    const live = cards.find((card) => card.entity === bedtime);
+    assert.equal(row?.secondary, "Disabled");
+    assert.equal(row?.icon, "mdi:flash-off");
+    assert.equal(row?.icon_color, "grey");
+    assert.equal((row?.hold_action as { perform_action?: string }).perform_action, "automation.toggle");
+    assert.equal(String(live?.secondary).includes("last_triggered"), true);
+    assert.equal(String(live?.icon_color).includes("green"), true);
+    const chips = cards.find((card) => String(card.type).endsWith("chips-card"));
+    const contents = (chips?.chips as Array<{ content: string }>).map((chip) => chip.content);
+    assert.deepEqual(contents, ["Automations 1 off 1 on 1 disabled"]);
+  });
+
+  it("does not let a disabled automation keep the area available", () => {
+    const fixture = hass({
+      devices: [{ id: "shed-dev", area_id: "shed" }],
+      entities: [
+        { entity_id: "light.shed", device_id: "shed-dev" },
+        { entity_id: "automation.shed_lights", device_id: "shed-dev" },
+      ],
+      states: {
+        "light.shed": state("light.shed", "unavailable"),
+        "automation.shed_lights": state("automation.shed_lights", "on"),
+      },
+    });
+    assert.equal(areaUnavailable(fixture, "shed"), false);
+    assert.equal(areaUnavailable(fixture, "shed", new Set(["automation.shed_lights"])), true);
+
+    const onlyAutomation = hass({
+      devices: [{ id: "shed-dev", area_id: "shed" }],
+      entities: [{ entity_id: "automation.shed_lights", device_id: "shed-dev" }],
+      states: { "automation.shed_lights": state("automation.shed_lights", "on") },
+    });
+    assert.equal(areaUnavailable(onlyAutomation, "shed"), false);
+    assert.equal(areaUnavailable(onlyAutomation, "shed", new Set(["automation.shed_lights"])), true);
+  });
+});
+
 describe("areaUnavailable", () => {
   it("marks an area unavailable when every device entity is unavailable", () => {
     const result = areaUnavailable(
@@ -1388,6 +1540,89 @@ describe("areaUnavailable", () => {
     assert.match(styles, /cursor:\s*not-allowed/);
     assert.equal(button.card_type, "button");
     assert.equal(Array.isArray(button.sub_button), true);
+  });
+
+  it("shifts dots left by the floor chevron only when the card asks to align them", () => {
+    const input = {
+      areaId: "bedroom",
+      name: "Bedroom",
+      icon: "mdi:bed",
+      sections: { ...emptySections(), lights: ["light.a"] },
+      states: { "light.a": state("light.a", "on") },
+    };
+    assert.equal(String(buildButtonConfig(input).styles).includes("margin-inline-end: 36px"), false);
+    assert.match(String(buildButtonConfig({ ...input, alignDots: true }).styles), /margin-inline-end: 36px !important/);
+  });
+});
+
+describe("floor dot rollup", () => {
+  it("fills a slot when any area is active and adds the counts", () => {
+    const on = sectionRollups(
+      { ...emptySections(), lights: ["light.a", "light.b"] },
+      { "light.a": state("light.a", "on"), "light.b": state("light.b", "off") },
+    );
+    const off = sectionRollups(
+      { ...emptySections(), lights: ["light.c"], openings: ["binary_sensor.door"] },
+      { "light.c": state("light.c", "off"), "binary_sensor.door": state("binary_sensor.door", "on") },
+    );
+    const dots = floorDotRow(["lights", "openings", "media"], [on, off]);
+    assert.deepEqual(
+      dots.map((dot) => [dot.id, dot.state, dot.label]),
+      [
+        ["lights", "on", "Lights 1/3 On"],
+        ["openings", "on", "Entries 1/1 Open"],
+        ["media", "empty", null],
+      ],
+    );
+    assert.equal(dots[0]?.background, "rgb(255, 193, 7)");
+    assert.equal(dots[0]?.ring, null);
+    assert.equal(dots[2]?.icon, "mdi:play-circle");
+  });
+
+  it("keeps a hollow dot when the section is present and nothing is active", () => {
+    const idle = sectionRollups(
+      { ...emptySections(), lights: ["light.a"] },
+      { "light.a": state("light.a", "off") },
+    );
+    const [dot] = floorDotRow(["lights"], [idle]);
+    assert.equal(dot?.state, "off");
+    assert.equal(dot?.label, "Lights 0/1 On");
+    assert.equal(dot?.background, "transparent");
+    assert.equal(dot?.ring, "rgb(255, 193, 7)");
+    assert.equal(dot?.color, "rgb(255, 193, 7)");
+  });
+
+  it("adds automation off, on, and disabled counts across areas", () => {
+    const first = sectionRollups(
+      { ...emptySections(), automations: ["automation.a", "automation.b"] },
+      {
+        "automation.a": state("automation.a", "on"),
+        "automation.b": state("automation.b", "off"),
+      },
+      new Set(["automation.b"]),
+    );
+    const second = sectionRollups(
+      { ...emptySections(), automations: ["automation.c"] },
+      { "automation.c": state("automation.c", "off") },
+    );
+    const [dot] = floorDotRow(["automations"], [first, second]);
+    assert.equal(dot?.state, "on");
+    assert.equal(dot?.label, "Automations 1 off 1 on 1 disabled");
+  });
+
+  it("leaves a slot empty when the section has entities but does not draw a dot", () => {
+    const sensors = sectionRollups(
+      { ...emptySections(), climate: ["sensor.temp"], selects: ["input_select.scene"] },
+      {
+        "sensor.temp": state("sensor.temp", "21", { device_class: "temperature" }),
+        "input_select.scene": state("input_select.scene", "movie"),
+      },
+    );
+    const dots = floorDotRow(["climate", "helpers"], [sensors]);
+    assert.deepEqual(
+      dots.map((dot) => dot.state),
+      ["empty", "empty"],
+    );
   });
 });
 

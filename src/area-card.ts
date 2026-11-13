@@ -1,8 +1,10 @@
+import { loadDisabledAutomations } from "./automations";
 import { buildButtonConfig } from "./button-config";
 import { hideAreaDotTooltip, syncAreaDotTooltips } from "./dot-tooltip";
 import { ensureDeps } from "./ensure-deps";
 import "./floor-card";
 import "./light-row";
+import "./section-title";
 import { buildPopupConfig } from "./popup-cards";
 import { parseHideSections, ROLLUP_ORDER, sectionRollups, sectionTitle, type RollupId, type SectionRollup, withoutSections } from "./rollups";
 import { areaDisplay, areaUnavailable, classifyArea, membershipKey, type ClassifierHass } from "./sections";
@@ -129,14 +131,16 @@ class AreaCard extends HTMLElement {
 
     const hass = this._hass;
     const areaId = this._config.area;
-    const hide = this._config.hide_sections;
     const { name, icon, picture } = areaDisplay(hass, areaId);
-    const unavailable = areaUnavailable(hass, areaId);
     const sections = classifyArea(hass, areaId);
+    const disabled = await loadDisabledAutomations(hass, sections.automations);
+    if (!this._config || this._hass !== hass || this._config.area !== areaId) return;
+    const hide = this._config.hide_sections;
+    const unavailable = areaUnavailable(hass, areaId, disabled);
     const visibleSections = withoutSections(sections, hide);
     const signature = membershipKey(areaId, name, icon, sections);
     const states = hass.states ?? {};
-    this.dotRollups = sectionRollups(visibleSections, states);
+    this.dotRollups = sectionRollups(visibleSections, states, disabled);
     const dotSlots = ROLLUP_ORDER.filter((id) => !hide.includes(id));
     const buttonConfig = buildButtonConfig({
       areaId,
@@ -147,8 +151,10 @@ class AreaCard extends HTMLElement {
       dotSlots,
       picture,
       unavailable,
+      disabledAutomations: disabled,
+      alignDots: !!this.closest("floor-card"),
     });
-    const popupConfig = buildPopupConfig(areaId, name, icon, visibleSections, states, picture);
+    const popupConfig = buildPopupConfig(areaId, name, icon, visibleSections, states, picture, disabled);
     const buttonKey = JSON.stringify(buttonConfig);
     const popupKey = JSON.stringify(popupConfig);
 
