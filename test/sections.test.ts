@@ -369,15 +369,29 @@ describe("popup and button configs", () => {
     assert.equal(JSON.stringify(popup).includes("custom:bubble-card"), false);
   });
 
-  it("gives the media player Mushroom's control lists", () => {
-    const cards = buildPopupCards({
-      ...emptySections(),
-      mediaPlayers: ["media_player.tv"],
-    });
-    const media = cards.find((card) => String(card.type).endsWith("media-player-card"));
-    assert.ok(Array.isArray(media?.media_controls));
-    assert.ok(Array.isArray(media?.volume_controls));
-    assert.equal(media?.media_controls.includes("play_pause_stop"), true);
+  it("uses the built-in media control card", () => {
+    const cards = buildPopupCards(
+      {
+        ...emptySections(),
+        mediaPlayers: ["media_player.tv"],
+      },
+      {
+        "media_player.tv": state("media_player.tv", "off", { friendly_name: "Man Cave TV" }),
+      },
+      "Man Cave",
+    );
+    const media = cards.find((card) => card.type === "media-control");
+    assert.equal(media?.entity, "media_player.tv");
+    assert.equal(media?.name, "TV");
+    assert.deepEqual(media?.grid_options, { columns: 12 });
+    assert.equal(media?.use_media_info, undefined);
+    assert.equal(media?.show_volume_level, undefined);
+    assert.equal(media?.media_controls, undefined);
+    assert.equal(media?.volume_controls, undefined);
+    assert.equal(
+      cards.some((card) => String(card.type).includes("media-player-card")),
+      false,
+    );
   });
 
   it("omits empty section headings", () => {
