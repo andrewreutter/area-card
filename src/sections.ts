@@ -30,6 +30,13 @@ export interface AreaEntry {
   area_id?: string;
   name?: string;
   icon?: string | null;
+  floor_id?: string | null;
+}
+
+export interface FloorEntry {
+  floor_id?: string;
+  name?: string;
+  icon?: string | null;
 }
 
 export interface ClassifierHass {
@@ -37,6 +44,7 @@ export interface ClassifierHass {
   entities?: Record<string, RegistryEntry> | RegistryEntry[];
   devices?: Record<string, DeviceEntry> | DeviceEntry[];
   areas?: Record<string, AreaEntry>;
+  floors?: Record<string, FloorEntry>;
 }
 
 export interface OccupancyItem {

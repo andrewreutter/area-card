@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { buildButtonConfig } from "../src/button-config";
+import { areasOnFloor, floorDisplay } from "../src/floors";
 import { stripRoomName } from "../src/names";
 import { tooltipPosition } from "../src/dot-tooltip";
 import { buildPopupCards, buildPopupConfig } from "../src/popup-cards";
@@ -13,6 +14,7 @@ import {
   type ClassifierHass,
   type DeviceEntry,
   type EntityState,
+  type FloorEntry,
   type RegistryEntry,
 } from "../src/sections";
 
@@ -945,3 +947,114 @@ describe("stripRoomName", () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// Floor helpers
+// ---------------------------------------------------------------------------
+
+function floorHass(
+  floors: Record<string, FloorEntry>,
+  areas: Record<string, AreaEntry>,
+): ClassifierHass {
+  return { floors, areas };
+}
+
+describe("floorDisplay", () => {
+  it("returns the floor name and icon when present", () => {
+    const h = floorHass({ downstairs: { floor_id: "downstairs", name: "Downstairs", icon: "mdi:home-floor-0" } }, {});
+    assert.deepEqual(floorDisplay(h, "downstairs"), { name: "Downstairs", icon: "mdi:home-floor-0" });
+  });
+
+  it("falls back to the floor id when name is missing", () => {
+    const h = floorHass({ f1: { floor_id: "f1" } }, {});
+    assert.equal(floorDisplay(h, "f1").name, "f1");
+  });
+
+  it("falls back to mdi:home-floor-0 when icon is missing", () => {
+    const h = floorHass({ f1: { floor_id: "f1", name: "Ground" } }, {});
+    assert.equal(floorDisplay(h, "f1").icon, "mdi:home-floor-0");
+  });
+
+  it("returns the floor id and default icon when the floor is unknown", () => {
+    const h = floorHass({}, {});
+    assert.deepEqual(floorDisplay(h, "unknown"), { name: "unknown", icon: "mdi:home-floor-0" });
+  });
+
+  it("returns the floor id and default icon when floors registry is absent", () => {
+    const h: ClassifierHass = {};
+    assert.deepEqual(floorDisplay(h, "x"), { name: "x", icon: "mdi:home-floor-0" });
+  });
+});
+
+describe("areasOnFloor", () => {
+  it("returns areas whose floor_id matches, sorted by name", () => {
+    const h = floorHass(
+      { down: { floor_id: "down", name: "Downstairs" } },
+      {
+        kitchen: { area_id: "kitchen", name: "Kitchen", floor_id: "down" },
+        living: { area_id: "living", name: "Living Room", floor_id: "down" },
+        office: { area_id: "office", name: "Office", floor_id: "up" },
+        garage: { area_id: "garage", name: "Garage" },
+      },
+    );
+    const result = areasOnFloor(h, "down");
+    assert.deepEqual(
+      result.map((a) => a.areaId),
+      ["kitchen", "living"],
+    );
+  });
+
+  it("sorts areas alphabetically by name", () => {
+    const h = floorHass(
+      { f: { floor_id: "f" } },
+      {
+        z_area: { area_id: "z_area", name: "Zebra Room", floor_id: "f" },
+        a_area: { area_id: "a_area", name: "Apple Room", floor_id: "f" },
+        m_area: { area_id: "m_area", name: "Mango Room", floor_id: "f" },
+      },
+    );
+    const result = areasOnFloor(h, "f");
+    assert.deepEqual(
+      result.map((a) => a.name),
+      ["Apple Room", "Mango Room", "Zebra Room"],
+    );
+  });
+
+  it("breaks name ties by area id", () => {
+    const h = floorHass(
+      { f: { floor_id: "f" } },
+      {
+        b_room: { area_id: "b_room", name: "Room", floor_id: "f" },
+        a_room: { area_id: "a_room", name: "Room", floor_id: "f" },
+      },
+    );
+    const result = areasOnFloor(h, "f");
+    assert.deepEqual(
+      result.map((a) => a.areaId),
+      ["a_room", "b_room"],
+    );
+  });
+
+  it("falls back to area id as name when area name is missing", () => {
+    const h = floorHass(
+      { f: { floor_id: "f" } },
+      {
+        nameless: { area_id: "nameless", floor_id: "f" },
+      },
+    );
+    const result = areasOnFloor(h, "f");
+    assert.equal(result[0].name, "nameless");
+  });
+
+  it("returns an empty list when no areas match the floor", () => {
+    const h = floorHass(
+      { f: { floor_id: "f" } },
+      { kitchen: { area_id: "kitchen", name: "Kitchen", floor_id: "other" } },
+    );
+    assert.deepEqual(areasOnFloor(h, "f"), []);
+  });
+
+  it("returns an empty list when there are no areas at all", () => {
+    const h: ClassifierHass = { floors: { f: { floor_id: "f" } } };
+    assert.deepEqual(areasOnFloor(h, "f"), []);
+  });
+});

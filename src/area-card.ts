@@ -1,6 +1,7 @@
 import { buildButtonConfig } from "./button-config";
 import { hideAreaDotTooltip, syncAreaDotTooltips } from "./dot-tooltip";
 import { ensureDeps } from "./ensure-deps";
+import "./floor-card";
 import "./light-row";
 import { buildPopupConfig } from "./popup-cards";
 import { sectionRollups, type SectionRollup } from "./rollups";

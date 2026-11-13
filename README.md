@@ -15,6 +15,17 @@ Status lists those rollups, such as `Lights 1/4 On`. Temperature and humidity se
 
 On/off lights toggle from the icon; the rest of the row opens more-info. Dimmable lights keep the Mushroom light card. A `switch.*_led` on the same device is a dot on the right of that light and toggles only the LED. Entity titles in the popup drop a leading room name. The popup header and the collapsed button keep the full room name. Automations assigned to the area, and automations whose name contains the room name, are listed under Automations.
 
+## Floor Card
+
+A collapsible floor header. Clicking the header collapses or expands the card. When expanded, one Area Card is shown for each area assigned to the floor, sorted alphabetically.
+
+```yaml
+type: custom:floor-card
+floor: downstairs
+```
+
+The visual editor has one required field, the floor.
+
 ## Private Bubble Card and Mushroom
 
 This card always runs the copies shipped with it:
