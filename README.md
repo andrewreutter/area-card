@@ -31,7 +31,7 @@ On/off lights toggle from the icon; the rest of the row opens more-info. Dimmabl
 
 ## Floor Card
 
-A collapsible floor header. Clicking the header collapses or expands the card. When expanded, one Area Card is shown for each area assigned to the floor, sorted alphabetically, including areas whose devices are unavailable.
+A collapsible floor header. Clicking the header collapses or expands the card. When expanded, one Area Card is shown for each area assigned to the floor, sorted alphabetically, including areas whose devices are unavailable. The open or closed state is stored in the browser under `area-card-floor-expanded:<floor id>` and restored on the next visit. A floor with no stored value starts expanded. localStorage is already separate for each Home Assistant host.
 
 The header is a section title: the floor name, a rule, and a collapse control. Its icon comes from the floor registry. A floor with no icon shows no icon.
 

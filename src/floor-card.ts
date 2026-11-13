@@ -1,3 +1,4 @@
+import { browserStorage, readFloorExpanded, writeFloorExpanded } from "./floor-state";
 import { areasOnFloor, floorDisplay, type AreaRef } from "./floors";
 import { ROLLUP_ORDER, sectionHasEntities, type RollupId } from "./rollups";
 import { classifyArea, type ClassifierHass } from "./sections";
@@ -65,6 +66,9 @@ class FloorCard extends HTMLElement {
       throw new Error("Floor is required");
     }
     if (this._config?.floor !== config.floor) {
+      // Apply the stored state before the first render so the chevron and
+      // room list do not flash the default.
+      this._expanded = readFloorExpanded(browserStorage(), config.floor);
       this.headerEl?.remove();
       this.bodyEl?.remove();
       this.headerEl = undefined;
@@ -302,6 +306,7 @@ class FloorCard extends HTMLElement {
 
   private toggle(): void {
     this._expanded = !this._expanded;
+    if (this._config) writeFloorExpanded(browserStorage(), this._config.floor, this._expanded);
     this.syncChevron();
     this.syncBody();
   }

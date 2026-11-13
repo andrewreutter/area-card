@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { buildButtonConfig } from "../src/button-config";
+import { floorExpandedKey, parseFloorExpanded } from "../src/floor-state";
 import { areasOnFloor, floorDisplay } from "../src/floors";
 import { stripRoomName } from "../src/names";
 import { tooltipPosition } from "../src/dot-tooltip";
@@ -1387,5 +1388,23 @@ describe("areaUnavailable", () => {
     assert.match(styles, /cursor:\s*not-allowed/);
     assert.equal(button.card_type, "button");
     assert.equal(Array.isArray(button.sub_button), true);
+  });
+});
+
+describe("floor expanded storage", () => {
+  it("keys each floor separately", () => {
+    assert.equal(floorExpandedKey("upstairs"), "area-card-floor-expanded:upstairs");
+    assert.equal(floorExpandedKey("downstairs"), "area-card-floor-expanded:downstairs");
+    assert.equal(floorExpandedKey("cabin"), "area-card-floor-expanded:cabin");
+  });
+
+  it("parses stored booleans and uses expanded when the value is missing", () => {
+    assert.equal(parseFloorExpanded("true"), true);
+    assert.equal(parseFloorExpanded("false"), false);
+    assert.equal(parseFloorExpanded(null), true);
+    assert.equal(parseFloorExpanded(undefined), true);
+    assert.equal(parseFloorExpanded(""), true);
+    assert.equal(parseFloorExpanded("yes"), true);
+    assert.equal(parseFloorExpanded(null, false), false);
   });
 });
