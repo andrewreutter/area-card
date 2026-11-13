@@ -7,6 +7,7 @@ import {
   DOT_ICON_PX,
   DOT_PX,
   FLOOR_CHEVRON_PX,
+  collapsedDotSlots,
   floorDotRow,
   ROLLUP_ORDER,
   sectionHasEntities,
@@ -152,7 +153,7 @@ class FloorCard extends HTMLElement {
     const areas = areasOnFloor(hass, floorId);
     const classified = areas.map((area) => classifyArea(hass, area.areaId));
     const hideList = computeFloorHide(classified);
-    const slots = ROLLUP_ORDER.filter((id) => !hideList.includes(id));
+    const slots = collapsedDotSlots(hideList);
     const groups = await Promise.all(
       classified.map(async (sections) => {
         const visible = withoutSections(sections, hideList);

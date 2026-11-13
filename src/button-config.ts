@@ -1,3 +1,4 @@
+import { climateSubtitle } from "./climate-subtitle";
 import { pictureBackgroundStyles } from "./picture";
 import { emptyRollupDotClass, FLOOR_CHEVRON_PX, ROLLUP_ORDER, rollupDotClass, rollupDotStyles, sectionIcon, sectionRollups, type RollupId } from "./rollups";
 import type { AreaSections, EntityState } from "./sections";
@@ -17,6 +18,8 @@ export interface ButtonConfigInput {
   disabledAutomations?: ReadonlySet<string>;
   /** Shift the dot row left by the floor chevron so it lines up with the floor header. */
   alignDots?: boolean;
+  /** Home Assistant's state formatter. The card falls back to state and unit when this is missing. */
+  formatEntityState?: (state: EntityState) => string;
 }
 
 /** Same treatment Bubble applies to a button whose entity is unavailable. */
@@ -29,6 +32,21 @@ const UNAVAILABLE_BUTTON_STYLES = [
   "}",
   ".bubble-buttons-container {",
   "  display: none;",
+  "}",
+].join("\n");
+
+/**
+ * Ellipsis on the climate subtitle. display has no !important so Bubble's
+ * `.hidden { display: none !important }` still hides an empty state line.
+ */
+const STATE_LINE_STYLES = [
+  ".bubble-name-container > .bubble-state {",
+  "  display: block;",
+  "  min-width: 0;",
+  "  max-width: 100%;",
+  "  overflow: hidden;",
+  "  text-overflow: ellipsis;",
+  "  white-space: nowrap;",
   "}",
 ].join("\n");
 
@@ -82,6 +100,13 @@ export function buildButtonConfig(input: ButtonConfigInput): Record<string, unkn
     sub_button: subButtons,
     styles: buttonStyles(rollups, input.picture, input.unavailable, input.alignDots),
   };
+  const subtitle = climateSubtitle(
+    input.sections.climate,
+    input.states ?? {},
+    input.name,
+    input.formatEntityState,
+  );
+  if (subtitle) config.state_content = `{{ ${JSON.stringify(subtitle)} }}`;
   return config;
 }
 
@@ -91,7 +116,7 @@ function buttonStyles(
   unavailable: boolean | undefined,
   alignDots: boolean | undefined,
 ): string {
-  const parts = [rollupDotStyles(rollups)];
+  const parts = [rollupDotStyles(rollups), STATE_LINE_STYLES];
   if (alignDots) parts.push(alignDotStyles());
   if (picture) parts.push(pictureBackgroundStyles(picture, "button"));
   if (unavailable) parts.push(UNAVAILABLE_BUTTON_STYLES);

@@ -1,5 +1,6 @@
 import { stripRoomName } from "./names";
 import { pictureBackgroundStyles } from "./picture";
+import { popupChromeStyles } from "./popup-chrome";
 import { rollupLabel, sectionColor, sectionIcon, sectionRollups, sectionTitle, type RollupId } from "./rollups";
 import type { AreaSections, EntityState } from "./sections";
 import { areaHash, BUBBLE_CARD_TYPE, mushroomCardType } from "./tags";
@@ -32,7 +33,7 @@ export function buildPopupConfig(
     background_update: true,
     cards: buildPopupCards(sections, states, name, disabledAutomations),
   };
-  if (picture) config.styles = pictureBackgroundStyles(picture, "popup");
+  config.styles = popupChromeStyles(picture ? pictureBackgroundStyles(picture, "popup") : undefined);
   return config;
 }
 
@@ -357,7 +358,7 @@ function named(
   return card;
 }
 
-function entityTitle(entity: string, states: Record<string, EntityState>, roomName: string): string {
+export function entityTitle(entity: string, states: Record<string, EntityState>, roomName: string): string {
   const raw = states[entity]?.attributes?.friendly_name;
   if (typeof raw !== "string" || raw.trim() === "") {
     return `{{ state_attr('${entity}', 'friendly_name') }}`;

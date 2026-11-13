@@ -18,6 +18,11 @@ export function emptyRollupDotClass(id: RollupId): string {
   return `area-dot-${id}-empty`;
 }
 
+/** Collapsed button and floor-header dots. Climate is a subtitle, not a column. */
+export function collapsedDotSlots(hide: readonly RollupId[]): RollupId[] {
+  return ROLLUP_ORDER.filter((id) => id !== "climate" && !hide.includes(id));
+}
+
 export interface SectionRollup {
   id: RollupId;
   title: string;
@@ -174,7 +179,10 @@ export function rollupLabel(rollup: SectionRollup): string {
   if (rollup.id === "automations") {
     const disabled = rollup.disabled ?? 0;
     const off = rollup.off ?? Math.max(0, rollup.total - rollup.active - disabled);
-    return `${rollup.title} ${off} off ${rollup.active} on ${disabled} disabled`;
+    const ready = rollup.active + off;
+    // Disabled automations stay out of the fraction. With none on or off, skip 0/0.
+    if (ready === 0) return `${rollup.title} ${disabled}, disabled`;
+    return `${rollup.title} ${rollup.active}/${ready} on, ${disabled}, disabled`;
   }
   return `${rollup.title} ${rollup.active}/${rollup.total} ${rollup.word}`;
 }

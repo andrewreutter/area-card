@@ -51,6 +51,7 @@ export interface ClassifierHass {
   floors?: Record<string, FloorEntry>;
   hassUrl?: (path: string) => string;
   callWS?: (message: { type: string; entity_id?: string }) => Promise<unknown>;
+  formatEntityState?: (stateObj: EntityState, state?: string) => string;
 }
 
 export interface OccupancyItem {

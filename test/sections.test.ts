@@ -1,12 +1,13 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { buildButtonConfig } from "../src/button-config";
+import { climateSubtitle } from "../src/climate-subtitle";
 import { floorExpandedKey, floorRuntimeConfig, parseFloorExpanded } from "../src/floor-state";
 import { areasOnFloor, floorDisplay } from "../src/floors";
 import { stripRoomName } from "../src/names";
 import { tooltipPosition } from "../src/dot-tooltip";
 import { buildPopupCards, buildPopupConfig } from "../src/popup-cards";
-import { dotTooltipLabel, floorDotRow, iconInk, parseHideSections, ROLLUP_ORDER, rollupLabel, sectionColor, sectionHasEntities, sectionIcon, sectionRollups, sectionTitle, withoutSections, type RollupId } from "../src/rollups";
+import { collapsedDotSlots, dotTooltipLabel, floorDotRow, iconInk, parseHideSections, ROLLUP_ORDER, rollupLabel, sectionColor, sectionHasEntities, sectionIcon, sectionRollups, sectionTitle, withoutSections, type RollupId } from "../src/rollups";
 import {
   areaDisplay,
   areaUnavailable,
@@ -267,7 +268,7 @@ describe("classifyArea", () => {
       [assigned]: state(assigned, "on", { friendly_name: "Man Cave Lights" }),
     };
     const rollup = sectionRollups(result, states).find((item) => item.id === "automations");
-    assert.equal(rollup && rollupLabel(rollup), "Automations 1 off 2 on 0 disabled");
+    assert.equal(rollup && rollupLabel(rollup), "Automations 2/3 on, 0, disabled");
     const cards = buildPopupCards(
       { ...emptySections(), automations: [lights] },
       { [lights]: states[lights] },
@@ -525,6 +526,7 @@ describe("popup and button configs", () => {
       icon: "mdi:bed",
       sections,
       states: offStates,
+      dotSlots: DOT_SLOTS,
     });
     const active = buildButtonConfig({
       areaId: "bedroom",
@@ -532,6 +534,7 @@ describe("popup and button configs", () => {
       icon: "mdi:bed",
       sections,
       states: onStates,
+      dotSlots: DOT_SLOTS,
     });
     const other = buildButtonConfig({
       areaId: "office_of_drew",
@@ -550,6 +553,7 @@ describe("popup and button configs", () => {
         "input_select.scene": state("input_select.scene", "movie"),
         "timer.nap": state("timer.nap", "idle"),
       },
+      dotSlots: DOT_SLOTS,
     });
     const offDots = inactive.sub_button as Array<Record<string, unknown>>;
     const onDots = active.sub_button as Array<Record<string, unknown>>;
@@ -570,7 +574,6 @@ describe("popup and button configs", () => {
     assert.match(styles, /--mdc-icon-size: 14px/);
     assert.equal(styles.includes("color: transparent"), false);
     const sectionIcons = [
-      "mdi:thermometer",
       "mdi:lightbulb",
       "mdi:play-circle",
       "mdi:toggle-switch",
@@ -604,8 +607,9 @@ describe("popup and button configs", () => {
     assert.equal(String(active.styles).includes("background: rgb(255, 193, 7)"), true);
     assert.equal(styles.includes("box-shadow: inset 0 0 0 1.5px rgb(255, 193, 7)"), true);
 
-    const emptyDot = offDots[0];
-    assert.deepEqual(emptyDot?.tap_action, { action: "none" });
+    const emptyDot = offDots.find((dot) => String(dot.css_class).endsWith("-empty"));
+    assert.ok(emptyDot);
+    assert.deepEqual(emptyDot.tap_action, { action: "none" });
     assert.equal(JSON.stringify(emptyDot).includes("light.toggle"), false);
     assert.equal(JSON.stringify(emptyDot).includes("automation.toggle"), false);
     assert.equal(JSON.stringify(onDots).includes("light.toggle"), false);
@@ -637,6 +641,7 @@ describe("popup and button configs", () => {
         icon: "mdi:office-building",
         sections: sparseSections,
         states: sparseStates,
+        dotSlots: DOT_SLOTS,
       }).sub_button as Array<Record<string, unknown>>
     ).map((dot) => dot.css_class);
     assert.deepEqual(
@@ -651,17 +656,7 @@ describe("popup and button configs", () => {
   });
 });
 
-const DOT_SLOTS = [
-  "climate",
-  "lights",
-  "media",
-  "switches",
-  "occupancy",
-  "openings",
-  "satellites",
-  "helpers",
-  "automations",
-] as const;
+const DOT_SLOTS = collapsedDotSlots([]);
 
 const roomAreas: Record<string, { area_id: string; name: string }> = {
   office_of_drew: { area_id: "office_of_drew", name: "Man Cave" },
@@ -871,6 +866,7 @@ describe("section rollups", () => {
     );
     const climate = cards.find((card) => card.entity === "sensor.temp");
     assert.equal(climate?.name, "Temperature");
+    assert.equal(climateSubtitle(sections.climate, states, "Man Cave"), "Temperature 21");
   });
 
   it("labels the satellite section Satellites and counts alarm or companion LED", () => {
@@ -1226,7 +1222,7 @@ describe("withoutSections and hide_sections on button config", () => {
       "media_player.tv": state("media_player.tv", "playing"),
     };
     const visibleSections = withoutSections(sections, hide);
-    const dotSlots = ROLLUP_ORDER.filter((id) => !hide.includes(id));
+    const dotSlots = collapsedDotSlots(hide);
     const config = buildButtonConfig({
       areaId: "room",
       name: "Room",
@@ -1236,16 +1232,13 @@ describe("withoutSections and hide_sections on button config", () => {
       dotSlots,
     });
     const dots = config.sub_button as Array<Record<string, unknown>>;
-    // 9 total ROLLUP_ORDER slots minus 2 hidden = 7
-    assert.equal(dots.length, ROLLUP_ORDER.length - 2);
-    // No media or satellite dot slots at all
+    assert.equal(dots.length, dotSlots.length);
     assert.ok(!dots.some((d) => String(d.css_class).includes("media")));
     assert.ok(!dots.some((d) => String(d.css_class).includes("satellites")));
-    // Remaining present section is lights-on
+    assert.ok(!dots.some((d) => String(d.css_class).includes("climate")));
     assert.ok(dots.some((d) => String(d.css_class).includes("lights-on")));
-    // Order matches ROLLUP_ORDER with the two ids removed
     const classes = dots.map((d) => String(d.css_class));
-    const expectedOrder = ROLLUP_ORDER.filter((id) => !hide.includes(id)).map((id) =>
+    const expectedOrder = dotSlots.map((id) =>
       id === "lights" ? "area-dot-lights-on" : `area-dot-${id}-empty`,
     );
     assert.deepEqual(classes, expectedOrder);
@@ -1341,6 +1334,14 @@ describe("area pictures", () => {
     assert.match(popupStyles, /\.bubble-pop-up-background[\s\S]*linear-gradient\(to bottom/);
     assert.match(buttonStyles, /color:\s*#fff !important/);
     assert.match(popupStyles, /color:\s*#fff !important/);
+    assert.match(buttonStyles, /\.bubble-state[^{]*\{[^}]*color:\s*#fff !important/);
+    assert.match(buttonStyles, /\.bubble-state[^{]*\{[^}]*text-shadow:\s*0 1px 2px rgba\(0,0,0,\.65\)/);
+    assert.match(
+      popupStyles,
+      /\.bubble-pop-up > \.bubble-header-container > \.bubble-header \.bubble-name,\n\.bubble-pop-up > \.bubble-header-container > \.bubble-header \.bubble-state \{[^}]*color:\s*#fff !important/,
+    );
+    assert.equal(popupStyles.includes("popup-style-classic"), false);
+    assert.equal(popupStyles.includes("popup-style-home-assistant"), false);
     assert.equal(buttonStyles.includes('url("' + picture + '")'), false);
   });
 
@@ -1353,7 +1354,14 @@ describe("area pictures", () => {
     });
     const popup = buildPopupConfig("kitchen", "Kitchen", "mdi:pot-steam", emptySections());
     assert.equal(String(button.styles).includes("background-image"), false);
-    assert.equal(popup.styles, undefined);
+    assert.equal(/\.bubble-state[^{]*\{[^}]*#fff/.test(String(button.styles)), false);
+    const popupStyles = String(popup.styles);
+    assert.equal(popupStyles.includes("background-image"), false);
+    assert.match(
+      popupStyles,
+      /\.bubble-header \.bubble-button-card-container \{[^}]*background:\s*none !important/,
+    );
+    assert.match(popupStyles, /\.bubble-header \.bubble-background,[\s\S]*display:\s*none !important/);
   });
 });
 
@@ -1370,10 +1378,10 @@ describe("disabled automations", () => {
     };
     const disabled = new Set([motion]);
     const rollups = sectionRollups(sections, states, disabled);
-    assert.equal(rollupLabel(rollups[0]!), "Automations 1 off 1 on 1 disabled");
+    assert.equal(rollupLabel(rollups[0]!), "Automations 1/2 on, 1, disabled");
     assert.equal(
       dotTooltipLabel("bubble-sub-button area-dot-automations-on", rollups),
-      "Automations 1 off 1 on 1 disabled",
+      "Automations 1/2 on, 1, disabled",
     );
     const filled = buildButtonConfig({
       areaId: "bedroom",
@@ -1389,7 +1397,7 @@ describe("disabled automations", () => {
     );
 
     const onlyDisabled = sectionRollups({ ...emptySections(), automations: [motion] }, states, disabled);
-    assert.equal(rollupLabel(onlyDisabled[0]!), "Automations 0 off 0 on 1 disabled");
+    assert.equal(rollupLabel(onlyDisabled[0]!), "Automations 1, disabled");
     assert.equal(onlyDisabled[0]?.active, 0);
     const hollow = buildButtonConfig({
       areaId: "bedroom",
@@ -1409,7 +1417,7 @@ describe("disabled automations", () => {
       states,
       new Set([away]),
     );
-    assert.equal(rollupLabel(offAndDead[0]!), "Automations 0 off 0 on 1 disabled");
+    assert.equal(rollupLabel(offAndDead[0]!), "Automations 1, disabled");
 
     const cards = buildPopupCards(sections, states, "Bedroom", disabled);
     const row = cards.find((card) => card.entity === motion);
@@ -1422,7 +1430,59 @@ describe("disabled automations", () => {
     assert.equal(String(live?.icon_color).includes("green"), true);
     const chips = cards.find((card) => String(card.type).endsWith("chips-card"));
     const contents = (chips?.chips as Array<{ content: string }>).map((chip) => chip.content);
-    assert.deepEqual(contents, ["Automations 1 off 1 on 1 disabled"]);
+    assert.deepEqual(contents, ["Automations 1/2 on, 1, disabled"]);
+  });
+
+  it("keeps a zero on-count in the fraction and leaves disabled out of that total", () => {
+    const on = "automation.on";
+    const offA = "automation.off_a";
+    const offB = "automation.off_b";
+    const offC = "automation.off_c";
+    const deadA = "automation.dead_a";
+    const deadB = "automation.dead_b";
+    const deadC = "automation.dead_c";
+
+    const allOff = sectionRollups(
+      { ...emptySections(), automations: [offA, offB, offC] },
+      {
+        [offA]: state(offA, "off"),
+        [offB]: state(offB, "off"),
+        [offC]: state(offC, "off"),
+      },
+    );
+    assert.equal(rollupLabel(allOff[0]!), "Automations 0/3 on, 0, disabled");
+    assert.equal(dotTooltipLabel("bubble-sub-button area-dot-automations-off", allOff), "Automations 0/3 on, 0, disabled");
+
+    const offAndDisabled = sectionRollups(
+      { ...emptySections(), automations: [offA, offB, deadA] },
+      {
+        [offA]: state(offA, "off"),
+        [offB]: state(offB, "off"),
+        [deadA]: state(deadA, "on"),
+      },
+      new Set([deadA]),
+    );
+    assert.equal(rollupLabel(offAndDisabled[0]!), "Automations 0/2 on, 1, disabled");
+    assert.equal(offAndDisabled[0]?.active, 0);
+    assert.equal(offAndDisabled[0]?.off, 2);
+    assert.equal(offAndDisabled[0]?.disabled, 1);
+
+    const disabledNotInTotal = sectionRollups(
+      { ...emptySections(), automations: [on, offA, deadA, deadB, deadC] },
+      {
+        [on]: state(on, "on"),
+        [offA]: state(offA, "off"),
+        [deadA]: state(deadA, "on"),
+        [deadB]: state(deadB, "off"),
+        [deadC]: state(deadC, "on"),
+      },
+      new Set([deadA, deadB, deadC]),
+    );
+    assert.equal(rollupLabel(disabledNotInTotal[0]!), "Automations 1/2 on, 3, disabled");
+    assert.equal(disabledNotInTotal[0]?.active, 1);
+    assert.equal(disabledNotInTotal[0]?.off, 1);
+    assert.equal(disabledNotInTotal[0]?.disabled, 3);
+    assert.equal(dotTooltipLabel("bubble-sub-button area-dot-automations-empty", disabledNotInTotal), null);
   });
 
   it("does not let a disabled automation keep the area available", () => {
@@ -1555,6 +1615,270 @@ describe("areaUnavailable", () => {
   });
 });
 
+describe("climate subtitle", () => {
+  const room = "Man Cave";
+
+  function button(
+    sections: AreaSections,
+    states: Record<string, EntityState | undefined>,
+    extra: { formatEntityState?: (state: EntityState) => string } = {},
+  ) {
+    return buildButtonConfig({
+      areaId: "office_of_drew",
+      name: room,
+      icon: "mdi:office-building",
+      sections,
+      states,
+      dotSlots: collapsedDotSlots([]),
+      ...extra,
+    });
+  }
+
+  it("strips the room name from a temperature sensor and quotes the template", () => {
+    const sections = { ...emptySections(), climate: ["sensor.temp"] };
+    const states = {
+      "sensor.temp": state("sensor.temp", "21", {
+        device_class: "temperature",
+        friendly_name: "Man Cave Temperature",
+        unit_of_measurement: "°C",
+      }),
+    };
+    assert.equal(climateSubtitle(sections.climate, states, room), "Temperature 21 °C");
+    const config = button(sections, states);
+    assert.equal(config.state_content, '{{ "Temperature 21 °C" }}');
+    assert.equal(config.button_type, "name");
+    assert.equal(config.entity, undefined);
+    assert.equal(config.show_state, undefined);
+    const styles = String(config.styles);
+    assert.match(styles, /\.bubble-state[^{]*\{[^}]*text-overflow:\s*ellipsis/);
+    assert.equal(/\.bubble-state[^{]*\{[^}]*display:[^;}]*!important/.test(styles), false);
+  });
+
+  it("joins humidity and temperature in friendly-name order with the fallback formatter", () => {
+    assert.equal(
+      climateSubtitle(
+        ["sensor.humidity"],
+        {
+          "sensor.humidity": state("sensor.humidity", "40", {
+            device_class: "humidity",
+            friendly_name: "Man Cave Humidity",
+            unit_of_measurement: "%",
+          }),
+        },
+        room,
+      ),
+      "Humidity 40 %",
+    );
+
+    const fixtureStates = {
+      "sensor.office_temperature": state("sensor.office_temperature", "21", {
+        device_class: "temperature",
+        friendly_name: "Man Cave Temperature",
+        unit_of_measurement: "°C",
+      }),
+      "sensor.office_humidity": state("sensor.office_humidity", "40", {
+        device_class: "humidity",
+        friendly_name: "Man Cave Humidity",
+        unit_of_measurement: "%",
+      }),
+    };
+    const classified = classifyArea(
+      hass({
+        areas: { office_of_drew: { name: room } },
+        entities: [
+          { entity_id: "sensor.office_temperature", area_id: "office_of_drew" },
+          { entity_id: "sensor.office_humidity", area_id: "office_of_drew" },
+        ],
+        states: fixtureStates,
+      }),
+      "office_of_drew",
+    );
+    assert.deepEqual(classified.climate, ["sensor.office_humidity", "sensor.office_temperature"]);
+    assert.equal(
+      climateSubtitle(classified.climate, fixtureStates, room),
+      "Humidity 40 % · Temperature 21 °C",
+    );
+  });
+
+  it("keeps unavailable and unknown and does not append a unit", () => {
+    assert.equal(
+      climateSubtitle(
+        ["sensor.temp"],
+        {
+          "sensor.temp": state("sensor.temp", "unavailable", {
+            friendly_name: "Man Cave Temperature",
+            unit_of_measurement: "°C",
+          }),
+        },
+        room,
+      ),
+      "Temperature unavailable",
+    );
+    assert.equal(
+      climateSubtitle(
+        ["sensor.temp"],
+        {
+          "sensor.temp": state("sensor.temp", "unknown", {
+            friendly_name: "Man Cave Temperature",
+            unit_of_measurement: "°C",
+          }),
+        },
+        room,
+      ),
+      "Temperature unknown",
+    );
+  });
+
+  it("uses the value alone when the sensor has no friendly name", () => {
+    assert.equal(
+      climateSubtitle(
+        ["sensor.temp"],
+        { "sensor.temp": state("sensor.temp", "21", { unit_of_measurement: "°C" }) },
+        room,
+      ),
+      "21 °C",
+    );
+  });
+
+  it("skips a missing state object", () => {
+    assert.equal(
+      climateSubtitle(
+        ["sensor.missing", "sensor.temp"],
+        {
+          "sensor.temp": state("sensor.temp", "21", {
+            friendly_name: "Man Cave Temperature",
+            unit_of_measurement: "°C",
+          }),
+        },
+        room,
+      ),
+      "Temperature 21 °C",
+    );
+  });
+
+  it("skips an empty formatted value and omits state_content when nothing remains", () => {
+    const states = {
+      "sensor.temp": state("sensor.temp", "21", {
+        friendly_name: "Man Cave Temperature",
+        unit_of_measurement: "°C",
+      }),
+      "sensor.humidity": state("sensor.humidity", "40", {
+        friendly_name: "Man Cave Humidity",
+        unit_of_measurement: "%",
+      }),
+    };
+    const formatEntityState = (entity: EntityState) =>
+      entity.entity_id === "sensor.temp" ? "" : `fmt ${entity.state}`;
+    assert.equal(
+      climateSubtitle(["sensor.humidity", "sensor.temp"], states, room, formatEntityState),
+      "Humidity fmt 40",
+    );
+    assert.equal(
+      climateSubtitle(["sensor.temp"], states, room, (entity) => `fmt ${entity.state}`),
+      "Temperature fmt 21",
+    );
+    const config = button({ ...emptySections(), climate: ["sensor.temp"] }, states, {
+      formatEntityState: () => "",
+    });
+    assert.equal("state_content" in config, false);
+    assert.equal("state_content" in button(emptySections(), {}), false);
+  });
+
+  it("drops the subtitle and the climate dot when climate is hidden", () => {
+    const hide: RollupId[] = ["climate"];
+    const sections = {
+      ...emptySections(),
+      climate: ["sensor.temp"],
+      lights: ["light.desk"],
+    };
+    const states = {
+      "sensor.temp": state("sensor.temp", "21", {
+        friendly_name: "Man Cave Temperature",
+        unit_of_measurement: "°C",
+      }),
+      "light.desk": state("light.desk", "on"),
+    };
+    const config = buildButtonConfig({
+      areaId: "office_of_drew",
+      name: room,
+      icon: "mdi:office-building",
+      sections: withoutSections(sections, hide),
+      states,
+      dotSlots: collapsedDotSlots(hide),
+    });
+    assert.equal("state_content" in config, false);
+    const dots = config.sub_button as Array<{ css_class: string }>;
+    assert.equal(dots.some((dot) => dot.css_class.includes("climate")), false);
+    assert.equal(dots[0]?.css_class, "area-dot-lights-on");
+  });
+
+  it("leaves climate domain thermostats out of the climate section", () => {
+    const result = classifyArea(
+      hass({
+        entities: [{ entity_id: "climate.office", area_id: "office_of_drew" }],
+        states: {
+          "climate.office": state("climate.office", "heat", { friendly_name: "Man Cave" }),
+        },
+      }),
+      "office_of_drew",
+    );
+    assert.deepEqual(result.climate, []);
+  });
+
+  it("keeps both temperature sensors in climate section order", () => {
+    const states = {
+      "sensor.east": state("sensor.east", "18", {
+        friendly_name: "Man Cave Temperature",
+        unit_of_measurement: "°C",
+      }),
+      "sensor.west": state("sensor.west", "21", {
+        friendly_name: "Man Cave Temperature",
+        unit_of_measurement: "°C",
+      }),
+    };
+    assert.equal(
+      climateSubtitle(["sensor.west", "sensor.east"], states, room),
+      "Temperature 21 °C · Temperature 18 °C",
+    );
+  });
+
+  it("escapes quotes and backslashes in the state template", () => {
+    const states = {
+      "sensor.temp": state("sensor.temp", "21", {
+        friendly_name: 'Man Cave Temp "C" \\',
+        unit_of_measurement: "°C",
+      }),
+    };
+    assert.equal(climateSubtitle(["sensor.temp"], states, room), 'Temp "C" \\ 21 °C');
+    const config = button({ ...emptySections(), climate: ["sensor.temp"] }, states);
+    assert.equal(config.state_content, '{{ "Temp \\"C\\" \\\\ 21 °C" }}');
+  });
+
+  it("drops climate from collapsed dots and still drops a hidden id", () => {
+    assert.equal(collapsedDotSlots([])[0], "lights");
+    assert.equal(collapsedDotSlots([]).includes("climate"), false);
+    assert.equal(ROLLUP_ORDER.includes("climate"), true);
+    assert.deepEqual(collapsedDotSlots(["media"]), [
+      "lights",
+      "switches",
+      "occupancy",
+      "openings",
+      "satellites",
+      "helpers",
+      "automations",
+    ]);
+  });
+
+  it("leaves the floor header without a climate slot when sensors are the only extra section", () => {
+    const sections = { ...emptySections(), climate: ["sensor.temp"] };
+    const hide = ROLLUP_ORDER.filter((id) => !sectionHasEntities(id, sections));
+    assert.equal(hide.includes("climate"), false);
+    const slots = collapsedDotSlots(hide);
+    assert.equal(slots.includes("climate"), false);
+    assert.deepEqual(slots, []);
+  });
+});
+
 describe("floor dot rollup", () => {
   it("fills a slot when any area is active and adds the counts", () => {
     const on = sectionRollups(
@@ -1607,7 +1931,7 @@ describe("floor dot rollup", () => {
     );
     const [dot] = floorDotRow(["automations"], [first, second]);
     assert.equal(dot?.state, "on");
-    assert.equal(dot?.label, "Automations 1 off 1 on 1 disabled");
+    assert.equal(dot?.label, "Automations 1/2 on, 1, disabled");
   });
 
   it("leaves a slot empty when the section has entities but does not draw a dot", () => {

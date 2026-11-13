@@ -3,10 +3,12 @@ import { buildButtonConfig } from "./button-config";
 import { hideAreaDotTooltip, syncAreaDotTooltips } from "./dot-tooltip";
 import { ensureDeps } from "./ensure-deps";
 import "./floor-card";
+import "./floors-card";
 import "./light-row";
 import "./section-title";
 import { buildPopupConfig } from "./popup-cards";
-import { parseHideSections, ROLLUP_ORDER, sectionRollups, sectionTitle, type RollupId, type SectionRollup, withoutSections } from "./rollups";
+import { areaSettingsPath, insertAreaEditButton } from "./popup-chrome";
+import { collapsedDotSlots, parseHideSections, ROLLUP_ORDER, sectionRollups, sectionTitle, type RollupId, type SectionRollup, withoutSections } from "./rollups";
 import { areaDisplay, areaUnavailable, classifyArea, membershipKey, type ClassifierHass } from "./sections";
 import { BUBBLE_ELEMENT } from "./tags";
 
@@ -54,6 +56,11 @@ class AreaCard extends HTMLElement {
   private tooltipObserver?: MutationObserver;
   private tooltipFrame = 0;
   private tooltipTries = 0;
+  private editHost?: HTMLElement;
+  private editObserver?: MutationObserver;
+  private editFrame = 0;
+  private editTries = 0;
+  private editAreaId?: string;
 
   static getConfigForm(): typeof CONFIG_FORM {
     return CONFIG_FORM;
@@ -101,6 +108,7 @@ class AreaCard extends HTMLElement {
 
   disconnectedCallback(): void {
     this.stopDotTooltipWatch();
+    this.stopAreaEditWatch();
     hideAreaDotTooltip();
   }
 
@@ -141,18 +149,19 @@ class AreaCard extends HTMLElement {
     const signature = membershipKey(areaId, name, icon, sections);
     const states = hass.states ?? {};
     this.dotRollups = sectionRollups(visibleSections, states, disabled);
-    const dotSlots = ROLLUP_ORDER.filter((id) => !hide.includes(id));
+    const formatEntityState = hass.formatEntityState;
     const buttonConfig = buildButtonConfig({
       areaId,
       name,
       icon,
       sections: visibleSections,
       states,
-      dotSlots,
+      dotSlots: collapsedDotSlots(hide),
       picture,
       unavailable,
       disabledAutomations: disabled,
       alignDots: !!this.closest("floor-card"),
+      formatEntityState: typeof formatEntityState === "function" ? formatEntityState.bind(hass) : undefined,
     });
     const popupConfig = buildPopupConfig(areaId, name, icon, visibleSections, states, picture, disabled);
     const buttonKey = JSON.stringify(buttonConfig);
@@ -161,6 +170,7 @@ class AreaCard extends HTMLElement {
     if (this.signature !== signature || !this.buttonEl || !this.popupEl) {
       hideAreaDotTooltip();
       this.stopDotTooltipWatch();
+      this.stopAreaEditWatch();
       this.buttonEl?.remove();
       this.popupEl?.remove();
       this.buttonEl = document.createElement(BUBBLE_ELEMENT) as BubbleElement;
@@ -188,6 +198,7 @@ class AreaCard extends HTMLElement {
     this.buttonEl.hass = hass;
     this.popupEl.hass = hass;
     this.watchDotTooltips();
+    this.watchAreaEdit(areaId);
     this.querySelector("[data-area-card-error]")?.remove();
   }
 
@@ -232,6 +243,85 @@ class AreaCard extends HTMLElement {
     const root = this.buttonEl?.shadowRoot;
     if (!root) return;
     syncAreaDotTooltips(root, this.dotRollups);
+  }
+
+  private stopAreaEditWatch(): void {
+    this.editObserver?.disconnect();
+    this.editObserver = undefined;
+    if (this.editFrame) cancelAnimationFrame(this.editFrame);
+    this.editFrame = 0;
+    this.editHost = undefined;
+    this.editTries = 0;
+  }
+
+  // Bubble rebuilds header actions, so a one-time gear insert disappears.
+  private watchAreaEdit(areaId: string): void {
+    const host = this.popupEl;
+    this.editAreaId = areaId;
+    if (!host) return;
+    if (this.editHost === host) {
+      this.applyAreaEdit();
+      return;
+    }
+    this.stopAreaEditWatch();
+    this.editAreaId = areaId;
+    this.editHost = host;
+    const attach = () => {
+      if (this.popupEl !== host || !this.isConnected) return;
+      const root = host.shadowRoot;
+      if (!root) {
+        if (this.editTries++ < 90) this.editFrame = requestAnimationFrame(attach);
+        return;
+      }
+      this.applyAreaEdit();
+      this.editObserver = new MutationObserver(() => this.applyAreaEdit());
+      this.editObserver.observe(root, {
+        childList: true,
+        subtree: true,
+        attributes: true,
+        attributeFilter: ["class"],
+      });
+    };
+    attach();
+  }
+
+  private applyAreaEdit(): void {
+    const root = this.popupEl?.shadowRoot;
+    const areaId = this.editAreaId;
+    if (!root || !areaId) return;
+    const actions = root.querySelector(".bubble-header-actions");
+    if (!actions) return;
+    const close = actions.querySelector(".bubble-close-button");
+    if (!close || close.previousElementSibling?.classList.contains("area-card-edit-area")) return;
+    insertAreaEditButton(actions, this.areaEditButton(areaId));
+  }
+
+  private areaEditButton(areaId: string): HTMLButtonElement {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "bubble-header-action-button area-card-edit-area";
+    button.setAttribute("aria-label", "Edit area");
+    button.style.padding = "0";
+    button.style.border = "none";
+    const icon = document.createElement("ha-icon");
+    icon.setAttribute("icon", "mdi:cog");
+    icon.setAttribute("aria-hidden", "true");
+    icon.style.setProperty("--mdc-icon-size", "24px");
+    button.append(icon);
+    button.addEventListener("pointerdown", (event) => event.stopPropagation());
+    button.addEventListener("click", (event) => {
+      event.stopPropagation();
+      const from = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+      window.history.pushState({ from }, "", areaSettingsPath(areaId));
+      window.dispatchEvent(
+        new CustomEvent("location-changed", {
+          bubbles: true,
+          composed: true,
+          detail: { replace: false },
+        }),
+      );
+    });
+    return button;
   }
 
   private showError(message: string): void {

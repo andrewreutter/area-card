@@ -1,5 +1,11 @@
 import type { AreaEntry, ClassifierHass } from "./sections";
 
+/** Registry order, which is hass.floors key order. Do not sort. */
+export function floorIds(hass: ClassifierHass): string[] | undefined {
+  if (!hass.floors) return undefined;
+  return Object.keys(hass.floors);
+}
+
 export function floorDisplay(
   hass: ClassifierHass,
   floorId: string,
