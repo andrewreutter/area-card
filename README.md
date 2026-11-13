@@ -7,7 +7,19 @@ type: custom:area-card
 area: office_of_drew
 ```
 
-The visual editor has one required field, the area. There is no name, icon, hash, light, or visibility option on the card. Floor visibility stays on the Lovelace card's own Visibility tab.
+The visual editor has one required field, the area, and an optional multi-select "Hide sections". There is no name, icon, hash, light, or visibility option on the card. Floor visibility stays on the Lovelace card's own Visibility tab.
+
+Sections can be hidden from both the collapsed dots and the popup:
+
+```yaml
+type: custom:area-card
+area: office_of_drew
+hide_sections:
+  - media
+  - satellites
+```
+
+Valid section ids are: `climate`, `lights`, `media`, `switches`, `occupancy`, `openings`, `satellites`, `helpers`, `automations`. A hidden section is fully removed — not left as an invisible spacer — so the dot row is only as wide as the visible sections.
 
 The button and the popup are the same card. The collapsed button keeps one dot slot for every section, in a fixed order, so stacked rooms line up. A slot is filled when that section is active, a hollow ring when the section is present but nothing is active, and invisible when the section is absent. Tapping the button or a visible dot opens the popup. Empty sections stay out of the popup.
 
@@ -27,6 +39,8 @@ floor: downstairs
 ```
 
 The visual editor has one required field, the floor.
+
+The Floor Card automatically hides sections that have no entities on any area of the floor. This keeps the dot row only as wide as the floor actually uses. A section present in even one area stays visible in all area cards on that floor so the dots still line up. Climate sensors and Helper selects/timers count toward section presence even though they do not draw a dot.
 
 ## Private Bubble Card and Mushroom
 

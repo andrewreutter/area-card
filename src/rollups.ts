@@ -162,6 +162,52 @@ function isRollupId(value: string): value is RollupId {
   return (ROLLUP_ORDER as readonly string[]).includes(value);
 }
 
+export function parseHideSections(value: unknown): RollupId[] {
+  if (value === undefined || value === null) return [];
+  if (!Array.isArray(value)) throw new Error("hide_sections must be a list");
+  const result: RollupId[] = [];
+  for (const item of value) {
+    if (typeof item !== "string" || !isRollupId(item)) {
+      throw new Error(`Unknown section: ${String(item)}`);
+    }
+    result.push(item);
+  }
+  return result;
+}
+
+export function sectionHasEntities(id: RollupId, sections: AreaSections): boolean {
+  switch (id) {
+    case "climate": return sections.climate.length > 0;
+    case "lights": return sections.lights.length > 0;
+    case "media": return sections.mediaPlayers.length > 0;
+    case "switches": return sections.switches.length > 0;
+    case "occupancy": return sections.occupancy.length > 0;
+    case "openings": return sections.openings.length > 0;
+    case "satellites": return sections.satellites.length > 0;
+    case "helpers": return sections.helpers.length > 0 || sections.selects.length > 0;
+    case "automations": return sections.automations.length > 0;
+  }
+}
+
+export function withoutSections(sections: AreaSections, hide: readonly RollupId[]): AreaSections {
+  if (hide.length === 0) return sections;
+  const result: AreaSections = { ...sections };
+  for (const id of hide) {
+    switch (id) {
+      case "climate": result.climate = []; break;
+      case "lights": result.lights = []; result.lightLeds = {}; break;
+      case "media": result.mediaPlayers = []; break;
+      case "switches": result.switches = []; break;
+      case "occupancy": result.occupancy = []; break;
+      case "openings": result.openings = []; break;
+      case "satellites": result.satellites = []; break;
+      case "helpers": result.helpers = []; result.selects = []; break;
+      case "automations": result.automations = []; break;
+    }
+  }
+  return result;
+}
+
 export function rollupDotClass(rollup: SectionRollup): string {
   return `area-dot-${rollup.id}-${rollup.active > 0 ? "on" : "off"}`;
 }

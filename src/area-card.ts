@@ -4,12 +4,13 @@ import { ensureDeps } from "./ensure-deps";
 import "./floor-card";
 import "./light-row";
 import { buildPopupConfig } from "./popup-cards";
-import { sectionRollups, type SectionRollup } from "./rollups";
+import { parseHideSections, ROLLUP_ORDER, sectionRollups, sectionTitle, type RollupId, type SectionRollup, withoutSections } from "./rollups";
 import { areaDisplay, classifyArea, membershipKey, type ClassifierHass } from "./sections";
 import { BUBBLE_ELEMENT } from "./tags";
 
 interface AreaCardConfig {
   area: string;
+  hide_sections: RollupId[];
 }
 
 interface BubbleElement extends HTMLElement {
@@ -23,6 +24,15 @@ const CONFIG_FORM = {
       name: "area",
       required: true,
       selector: { area: {} },
+    },
+    {
+      name: "hide_sections",
+      selector: {
+        select: {
+          multiple: true,
+          options: ROLLUP_ORDER.map((id) => ({ value: id, label: sectionTitle(id) })),
+        },
+      },
     },
   ],
 };
@@ -49,7 +59,7 @@ class AreaCard extends HTMLElement {
 
   static getStubConfig(hass?: ClassifierHass): AreaCardConfig {
     const first = hass?.areas ? Object.keys(hass.areas)[0] : undefined;
-    return { area: first || "area" };
+    return { area: first || "area", hide_sections: [] };
   }
 
   getConfigForm(): typeof CONFIG_FORM {
@@ -64,11 +74,12 @@ class AreaCard extends HTMLElement {
     return 2;
   }
 
-  setConfig(config: { area?: unknown }): void {
+  setConfig(config: { area?: unknown; hide_sections?: unknown }): void {
     if (!config || typeof config.area !== "string" || config.area.trim() === "") {
       throw new Error("Area is required");
     }
-    this._config = { area: config.area };
+    const hide = parseHideSections(config.hide_sections);
+    this._config = { area: config.area, hide_sections: hide };
     this.schedule();
   }
 
@@ -118,19 +129,23 @@ class AreaCard extends HTMLElement {
 
     const hass = this._hass;
     const areaId = this._config.area;
+    const hide = this._config.hide_sections;
     const { name, icon } = areaDisplay(hass, areaId);
     const sections = classifyArea(hass, areaId);
+    const visibleSections = withoutSections(sections, hide);
     const signature = membershipKey(areaId, name, icon, sections);
     const states = hass.states ?? {};
-    this.dotRollups = sectionRollups(sections, states);
+    this.dotRollups = sectionRollups(visibleSections, states);
+    const dotSlots = ROLLUP_ORDER.filter((id) => !hide.includes(id));
     const buttonConfig = buildButtonConfig({
       areaId,
       name,
       icon,
-      sections,
+      sections: visibleSections,
       states,
+      dotSlots,
     });
-    const popupConfig = buildPopupConfig(areaId, name, icon, sections, states);
+    const popupConfig = buildPopupConfig(areaId, name, icon, visibleSections, states);
     const buttonKey = JSON.stringify(buttonConfig);
     const popupKey = JSON.stringify(popupConfig);
 

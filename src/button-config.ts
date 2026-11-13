@@ -1,4 +1,4 @@
-import { emptyRollupDotClass, ROLLUP_ORDER, rollupDotClass, rollupDotStyles, sectionRollups } from "./rollups";
+import { emptyRollupDotClass, ROLLUP_ORDER, rollupDotClass, rollupDotStyles, sectionRollups, type RollupId } from "./rollups";
 import type { AreaSections, EntityState } from "./sections";
 import { areaHash, BUBBLE_CARD_TYPE } from "./tags";
 
@@ -8,6 +8,8 @@ export interface ButtonConfigInput {
   icon: string;
   sections: AreaSections;
   states?: Record<string, EntityState | undefined>;
+  /** Ordered list of section ids to include as dot sub-buttons. Defaults to all slots (ROLLUP_ORDER). */
+  dotSlots?: readonly RollupId[];
 }
 
 export function buildButtonConfig(input: ButtonConfigInput): Record<string, unknown> {
@@ -18,7 +20,8 @@ export function buildButtonConfig(input: ButtonConfigInput): Record<string, unkn
   };
   const rollups = sectionRollups(input.sections, input.states ?? {});
   const byId = new Map(rollups.map((rollup) => [rollup.id, rollup]));
-  const subButtons = ROLLUP_ORDER.map((id) => {
+  const slots = input.dotSlots ?? ROLLUP_ORDER;
+  const subButtons = slots.map((id) => {
     const rollup = byId.get(id);
     if (!rollup) {
       return {

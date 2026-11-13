@@ -1,5 +1,6 @@
 import { areasOnFloor, floorDisplay, type AreaRef } from "./floors";
-import type { ClassifierHass } from "./sections";
+import { ROLLUP_ORDER, sectionHasEntities, type RollupId } from "./rollups";
+import { classifyArea, type ClassifierHass } from "./sections";
 
 interface FloorCardConfig {
   floor: string;
@@ -29,6 +30,7 @@ class FloorCard extends HTMLElement {
   private areaEls = new Map<string, AreaCardElement>();
   private renderedFloor?: string;
   private renderedAreas?: string;
+  private renderedHide?: string;
   private running = false;
   private queued = false;
 
@@ -70,6 +72,7 @@ class FloorCard extends HTMLElement {
       this.areaEls.clear();
       this.renderedFloor = undefined;
       this.renderedAreas = undefined;
+      this.renderedHide = undefined;
     }
     this._config = { floor: config.floor };
     this.schedule();
@@ -117,6 +120,8 @@ class FloorCard extends HTMLElement {
     const { name, icon } = floorDisplay(hass, floorId);
     const areas = areasOnFloor(hass, floorId);
     const areasKey = areas.map((a) => a.areaId).join(",");
+    const hideList = computeFloorHide(hass, areas);
+    const hideKey = hideList.join(",");
 
     // Build the fixed chrome on first render
     if (!this.headerEl) {
@@ -144,8 +149,15 @@ class FloorCard extends HTMLElement {
 
     // Rebuild area list when membership changes
     if (this.renderedAreas !== areasKey) {
-      this.syncAreaCards(areas, hass);
+      this.syncAreaCards(areas, hass, hideList);
       this.renderedAreas = areasKey;
+      this.renderedHide = hideKey;
+    } else if (this.renderedHide !== hideKey) {
+      // Area list unchanged but hidden sections changed — update configs only
+      for (const [areaId, el] of this.areaEls) {
+        el.setConfig?.({ area: areaId, hide_sections: hideList });
+      }
+      this.renderedHide = hideKey;
     }
 
     // Always forward hass to every area card
@@ -259,7 +271,7 @@ class FloorCard extends HTMLElement {
     }
   }
 
-  private syncAreaCards(areas: AreaRef[], hass: ClassifierHass): void {
+  private syncAreaCards(areas: AreaRef[], hass: ClassifierHass, hideList: RollupId[]): void {
     const nextEls = new Map<string, AreaCardElement>();
     const fragment = document.createDocumentFragment();
 
@@ -267,8 +279,8 @@ class FloorCard extends HTMLElement {
       let el = this.areaEls.get(areaId);
       if (!el) {
         el = document.createElement("area-card") as AreaCardElement;
-        el.setConfig?.({ area: areaId });
       }
+      el.setConfig?.({ area: areaId, hide_sections: hideList });
       nextEls.set(areaId, el);
       fragment.appendChild(el);
     }
@@ -308,6 +320,12 @@ class FloorCard extends HTMLElement {
     }
     error.textContent = message;
   }
+}
+
+function computeFloorHide(hass: ClassifierHass, areas: AreaRef[]): RollupId[] {
+  if (areas.length === 0) return [];
+  const sectionsList = areas.map((a) => classifyArea(hass, a.areaId));
+  return ROLLUP_ORDER.filter((id) => sectionsList.every((s) => !sectionHasEntities(id, s)));
 }
 
 if (!customElements.get("floor-card")) {

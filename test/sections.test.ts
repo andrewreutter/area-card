@@ -5,7 +5,7 @@ import { areasOnFloor, floorDisplay } from "../src/floors";
 import { stripRoomName } from "../src/names";
 import { tooltipPosition } from "../src/dot-tooltip";
 import { buildPopupCards, buildPopupConfig } from "../src/popup-cards";
-import { dotTooltipLabel, rollupLabel, sectionRollups, sectionTitle } from "../src/rollups";
+import { dotTooltipLabel, parseHideSections, ROLLUP_ORDER, rollupLabel, sectionHasEntities, sectionRollups, sectionTitle, withoutSections, type RollupId } from "../src/rollups";
 import {
   classifyArea,
   emptySections,
@@ -1063,5 +1063,173 @@ describe("areasOnFloor", () => {
   it("returns an empty list when there are no areas at all", () => {
     const h: ClassifierHass = { floors: { f: { floor_id: "f" } } };
     assert.deepEqual(areasOnFloor(h, "f"), []);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// hide_sections
+// ---------------------------------------------------------------------------
+
+describe("parseHideSections", () => {
+  it("returns empty for undefined and null", () => {
+    assert.deepEqual(parseHideSections(undefined), []);
+    assert.deepEqual(parseHideSections(null), []);
+  });
+
+  it("returns valid ids unchanged", () => {
+    assert.deepEqual(parseHideSections(["media", "satellites"]), ["media", "satellites"] as RollupId[]);
+  });
+
+  it("throws for a non-list value", () => {
+    assert.throws(() => parseHideSections("media"), /list/);
+    assert.throws(() => parseHideSections(42), /list/);
+  });
+
+  it("throws for an unknown section id", () => {
+    assert.throws(() => parseHideSections(["media", "bogus"]), /Unknown/);
+  });
+});
+
+describe("sectionHasEntities", () => {
+  it("climate: present when climate has sensors, absent when empty", () => {
+    assert.equal(sectionHasEntities("climate", { ...emptySections(), climate: ["sensor.temp"] }), true);
+    assert.equal(sectionHasEntities("climate", emptySections()), false);
+  });
+
+  it("helpers: present when helpers OR selects non-empty, absent when both empty", () => {
+    assert.equal(sectionHasEntities("helpers", { ...emptySections(), selects: ["input_select.s"] }), true);
+    assert.equal(sectionHasEntities("helpers", { ...emptySections(), helpers: ["input_boolean.b"] }), true);
+    assert.equal(sectionHasEntities("helpers", emptySections()), false);
+  });
+
+  it("covers every RollupId", () => {
+    for (const id of ROLLUP_ORDER) {
+      assert.equal(typeof sectionHasEntities(id, emptySections()), "boolean");
+    }
+  });
+});
+
+describe("withoutSections and hide_sections on button config", () => {
+  it("clearing media and satellites removes those fields and leaves others intact", () => {
+    const sections = {
+      ...emptySections(),
+      lights: ["light.a"],
+      mediaPlayers: ["media_player.tv"],
+      satellites: [{ entityId: "assist_satellite.kiosk" }],
+    };
+    const result = withoutSections(sections, ["media", "satellites"]);
+    assert.deepEqual(result.mediaPlayers, []);
+    assert.deepEqual(result.satellites, []);
+    assert.deepEqual(result.lights, ["light.a"]);
+  });
+
+  it("clearing helpers removes both helpers and selects", () => {
+    const sections = {
+      ...emptySections(),
+      helpers: ["input_boolean.g"],
+      selects: ["input_select.s"],
+    };
+    const result = withoutSections(sections, ["helpers"]);
+    assert.deepEqual(result.helpers, []);
+    assert.deepEqual(result.selects, []);
+  });
+
+  it("clearing lights also removes lightLeds", () => {
+    const sections = {
+      ...emptySections(),
+      lights: ["light.a"],
+      lightLeds: { "light.a": "switch.a_led" },
+    };
+    const result = withoutSections(sections, ["lights"]);
+    assert.deepEqual(result.lights, []);
+    assert.deepEqual(result.lightLeds, {});
+  });
+
+  it("hiding media and satellites produces a shorter dot row with correct classes", () => {
+    const hide: RollupId[] = ["media", "satellites"];
+    const sections = {
+      ...emptySections(),
+      lights: ["light.a"],
+      mediaPlayers: ["media_player.tv"],
+    };
+    const states = {
+      "light.a": state("light.a", "on"),
+      "media_player.tv": state("media_player.tv", "playing"),
+    };
+    const visibleSections = withoutSections(sections, hide);
+    const dotSlots = ROLLUP_ORDER.filter((id) => !hide.includes(id));
+    const config = buildButtonConfig({
+      areaId: "room",
+      name: "Room",
+      icon: "mdi:home",
+      sections: visibleSections,
+      states,
+      dotSlots,
+    });
+    const dots = config.sub_button as Array<Record<string, unknown>>;
+    // 9 total ROLLUP_ORDER slots minus 2 hidden = 7
+    assert.equal(dots.length, ROLLUP_ORDER.length - 2);
+    // No media or satellite dot slots at all
+    assert.ok(!dots.some((d) => String(d.css_class).includes("media")));
+    assert.ok(!dots.some((d) => String(d.css_class).includes("satellites")));
+    // Remaining present section is lights-on
+    assert.ok(dots.some((d) => String(d.css_class).includes("lights-on")));
+    // Order matches ROLLUP_ORDER with the two ids removed
+    const classes = dots.map((d) => String(d.css_class));
+    const expectedOrder = ROLLUP_ORDER.filter((id) => !hide.includes(id)).map((id) =>
+      id === "lights" ? "area-dot-lights-on" : `area-dot-${id}-empty`,
+    );
+    assert.deepEqual(classes, expectedOrder);
+  });
+
+  it("popup omits hidden sections and their Status chips", () => {
+    const hide: RollupId[] = ["media", "satellites"];
+    const sections = {
+      ...emptySections(),
+      lights: ["light.a"],
+      mediaPlayers: ["media_player.tv"],
+      satellites: [{ entityId: "assist_satellite.kiosk" }],
+    };
+    const states = {
+      "light.a": state("light.a", "off"),
+      "media_player.tv": state("media_player.tv", "playing"),
+      "assist_satellite.kiosk": state("assist_satellite.kiosk", "idle"),
+    };
+    const visible = withoutSections(sections, hide);
+    const cards = buildPopupCards(visible, states, "Room");
+    const titles = cards.filter((c) => c.title).map((c) => c.title);
+    assert.ok(titles.includes("Lights"), "Lights section should be present");
+    assert.ok(!titles.includes("Media players"), "Media players section should be hidden");
+    assert.ok(!titles.includes("Satellites"), "Satellites section should be hidden");
+  });
+});
+
+describe("floor-wide section hiding", () => {
+  it("hides sections absent on every area and keeps sections present on any area", () => {
+    // area1 has lights + temp sensor; area2 has openings + selects (helpers)
+    const sections1 = { ...emptySections(), lights: ["light.a"], climate: ["sensor.temp"] };
+    const sections2 = { ...emptySections(), openings: ["binary_sensor.door"], selects: ["input_select.s"] };
+    const all = [sections1, sections2];
+    const hide = ROLLUP_ORDER.filter((id) => all.every((s) => !sectionHasEntities(id, s)));
+    // lights, openings, climate, helpers(selects) all have at least one area → not hidden
+    assert.ok(!hide.includes("lights"), "lights present in area1");
+    assert.ok(!hide.includes("openings"), "openings present in area2");
+    assert.ok(!hide.includes("climate"), "climate present in area1 (temp sensor counts)");
+    assert.ok(!hide.includes("helpers"), "helpers present in area2 (selects count)");
+    // media, switches, occupancy, satellites, automations absent everywhere → hidden
+    assert.ok(hide.includes("media"));
+    assert.ok(hide.includes("switches"));
+    assert.ok(hide.includes("occupancy"));
+    assert.ok(hide.includes("satellites"));
+    assert.ok(hide.includes("automations"));
+  });
+
+  it("hides all sections when areas list is empty (guarded by floor card)", () => {
+    // computeFloorHide returns [] for empty areas; test the sectionHasEntities logic directly
+    const noAreas: typeof emptySections[] = [];
+    const hide = ROLLUP_ORDER.filter((id) => noAreas.every((s) => !sectionHasEntities(id, s())));
+    // every() on empty array is vacuously true — all ids would be hidden
+    // The floor card guards against this by returning [] when areas.length === 0
+    assert.equal(hide.length, ROLLUP_ORDER.length);
   });
 });
