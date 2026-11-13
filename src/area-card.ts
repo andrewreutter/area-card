@@ -1,7 +1,9 @@
 import { buildButtonConfig } from "./button-config";
+import { hideAreaDotTooltip, syncAreaDotTooltips } from "./dot-tooltip";
 import { ensureDeps } from "./ensure-deps";
 import "./light-row";
 import { buildPopupConfig } from "./popup-cards";
+import { sectionRollups, type SectionRollup } from "./rollups";
 import { areaDisplay, classifyArea, membershipKey, type ClassifierHass } from "./sections";
 import { BUBBLE_ELEMENT } from "./tags";
 
@@ -34,6 +36,11 @@ class AreaCard extends HTMLElement {
   private popupKey?: string;
   private running = false;
   private queued = false;
+  private dotRollups: SectionRollup[] = [];
+  private tooltipHost?: HTMLElement;
+  private tooltipObserver?: MutationObserver;
+  private tooltipFrame = 0;
+  private tooltipTries = 0;
 
   static getConfigForm(): typeof CONFIG_FORM {
     return CONFIG_FORM;
@@ -78,6 +85,11 @@ class AreaCard extends HTMLElement {
     this.schedule();
   }
 
+  disconnectedCallback(): void {
+    this.stopDotTooltipWatch();
+    hideAreaDotTooltip();
+  }
+
   private schedule(): void {
     if (this.running) {
       this.queued = true;
@@ -109,6 +121,7 @@ class AreaCard extends HTMLElement {
     const sections = classifyArea(hass, areaId);
     const signature = membershipKey(areaId, name, icon, sections);
     const states = hass.states ?? {};
+    this.dotRollups = sectionRollups(sections, states);
     const buttonConfig = buildButtonConfig({
       areaId,
       name,
@@ -121,6 +134,8 @@ class AreaCard extends HTMLElement {
     const popupKey = JSON.stringify(popupConfig);
 
     if (this.signature !== signature || !this.buttonEl || !this.popupEl) {
+      hideAreaDotTooltip();
+      this.stopDotTooltipWatch();
       this.buttonEl?.remove();
       this.popupEl?.remove();
       this.buttonEl = document.createElement(BUBBLE_ELEMENT) as BubbleElement;
@@ -143,7 +158,51 @@ class AreaCard extends HTMLElement {
 
     this.buttonEl.hass = hass;
     this.popupEl.hass = hass;
+    this.watchDotTooltips();
     this.querySelector("[data-area-card-error]")?.remove();
+  }
+
+  private stopDotTooltipWatch(): void {
+    this.tooltipObserver?.disconnect();
+    this.tooltipObserver = undefined;
+    if (this.tooltipFrame) cancelAnimationFrame(this.tooltipFrame);
+    this.tooltipFrame = 0;
+    this.tooltipHost = undefined;
+    this.tooltipTries = 0;
+  }
+
+  private watchDotTooltips(): void {
+    const host = this.buttonEl;
+    if (!host) return;
+    if (this.tooltipHost === host) {
+      this.applyDotTooltips();
+      return;
+    }
+    this.stopDotTooltipWatch();
+    this.tooltipHost = host;
+    const attach = () => {
+      if (this.buttonEl !== host || !this.isConnected) return;
+      const root = host.shadowRoot;
+      if (!root) {
+        if (this.tooltipTries++ < 90) this.tooltipFrame = requestAnimationFrame(attach);
+        return;
+      }
+      this.applyDotTooltips();
+      this.tooltipObserver = new MutationObserver(() => this.applyDotTooltips());
+      this.tooltipObserver.observe(root, {
+        childList: true,
+        subtree: true,
+        attributes: true,
+        attributeFilter: ["class"],
+      });
+    };
+    attach();
+  }
+
+  private applyDotTooltips(): void {
+    const root = this.buttonEl?.shadowRoot;
+    if (!root) return;
+    syncAreaDotTooltips(root, this.dotRollups);
   }
 
   private showError(message: string): void {

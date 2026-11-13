@@ -69,7 +69,7 @@ const META: Record<RollupId, Omit<SectionRollup, "id" | "active" | "total">> = {
     word: "On",
   },
   openings: {
-    title: "Doors and windows",
+    title: "Entries",
     icon: "mdi:door",
     iconColor: "blue",
     color: "rgb(33, 150, 243)",
@@ -138,8 +138,28 @@ export function sectionRollups(
   return rollups;
 }
 
+export function sectionTitle(id: RollupId): string {
+  return META[id].title;
+}
+
 export function rollupLabel(rollup: SectionRollup): string {
   return `${rollup.title} ${rollup.active}/${rollup.total} ${rollup.word}`;
+}
+
+const DOT_CLASS = /(?:^|\s)area-dot-([a-z]+)-(on|off|empty)(?:\s|$)/;
+
+/** Status-chip text for a visible dot. Empty slots have no tooltip. */
+export function dotTooltipLabel(className: string, rollups: readonly SectionRollup[]): string | null {
+  const match = DOT_CLASS.exec(className);
+  if (!match || match[2] === "empty") return null;
+  const id = match[1];
+  if (!isRollupId(id)) return null;
+  const rollup = rollups.find((item) => item.id === id);
+  return rollup ? rollupLabel(rollup) : null;
+}
+
+function isRollupId(value: string): value is RollupId {
+  return (ROLLUP_ORDER as readonly string[]).includes(value);
 }
 
 export function rollupDotClass(rollup: SectionRollup): string {

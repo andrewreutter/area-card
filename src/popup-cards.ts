@@ -1,5 +1,5 @@
 import { stripRoomName } from "./names";
-import { rollupLabel, sectionRollups } from "./rollups";
+import { rollupLabel, sectionRollups, sectionTitle } from "./rollups";
 import type { AreaSections, EntityState } from "./sections";
 import { areaHash, BUBBLE_CARD_TYPE, mushroomCardType } from "./tags";
 
@@ -60,17 +60,17 @@ export function buildPopupCards(
   );
 
   add(
-    "Climate",
+    sectionTitle("climate"),
     sections.climate.map((entity) => entityCard(entity, states, roomName)),
   );
 
   add(
-    "Lights",
+    sectionTitle("lights"),
     sections.lights.map((entity) => withLedDot(lightCard(entity, states[entity], states, roomName), sections.lightLeds[entity])),
   );
 
   add(
-    "Media players",
+    sectionTitle("media"),
     sections.mediaPlayers.map((entity) => ({
       ...named(
         {
@@ -90,7 +90,7 @@ export function buildPopupCards(
   );
 
   add(
-    "Switches",
+    sectionTitle("switches"),
     sections.switches.map((entity) =>
       entityCard(entity, states, roomName, {
         tap_action: { action: "toggle" },
@@ -100,12 +100,12 @@ export function buildPopupCards(
   );
 
   add(
-    "Occupancy",
+    sectionTitle("occupancy"),
     sections.occupancy.map((item) => occupancyCard(item.entityId, states, roomName, item.pressureEntityId)),
   );
 
   add(
-    "Doors and windows",
+    sectionTitle("openings"),
     sections.openings.map((entity) =>
       entity.startsWith("cover.")
         ? named(
@@ -125,7 +125,7 @@ export function buildPopupCards(
   );
 
   add(
-    "Kiosk & Satellites",
+    sectionTitle("satellites"),
     sections.satellites.map((item) => satelliteCard(item.entityId, states, roomName, item.ledEntityId, item.alarmEntityId)),
   );
 
@@ -144,10 +144,10 @@ export function buildPopupCards(
     ),
     ...sections.helpers.map((entity) => entityCard(entity, states, roomName)),
   ];
-  add("Helpers", helperCards);
+  add(sectionTitle("helpers"), helperCards);
 
   add(
-    "Automations",
+    sectionTitle("automations"),
     sections.automations.map((entity) => automationCard(entity, states, roomName)),
   );
 

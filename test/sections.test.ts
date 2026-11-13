@@ -2,8 +2,9 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { buildButtonConfig } from "../src/button-config";
 import { stripRoomName } from "../src/names";
+import { tooltipPosition } from "../src/dot-tooltip";
 import { buildPopupCards, buildPopupConfig } from "../src/popup-cards";
-import { sectionRollups } from "../src/rollups";
+import { dotTooltipLabel, rollupLabel, sectionRollups } from "../src/rollups";
 import {
   classifyArea,
   emptySections,
@@ -560,7 +561,7 @@ describe("popup and button configs", () => {
     const sparseCards = buildPopupCards(sparseSections, sparseStates, "Man Cave");
     assert.deepEqual(
       sparseCards.filter((card) => card.title).map((card) => card.title),
-      ["Status", "Climate", "Doors and windows", "Helpers"],
+      ["Status", "Climate", "Entries", "Helpers"],
     );
   });
 });
@@ -699,9 +700,20 @@ describe("section rollups", () => {
     };
     const rollups = sectionRollups(sections, states);
     assert.deepEqual(
-      rollups.map((rollup) => `${rollup.title} ${rollup.active}/${rollup.total} ${rollup.word}`),
-      ["Lights 1/4 On", "Doors and windows 1/4 Open"],
+      rollups.map((rollup) => rollupLabel(rollup)),
+      ["Lights 1/4 On", "Entries 1/4 Open"],
     );
+    assert.equal(dotTooltipLabel("bubble-sub-button area-dot-lights-on", rollups), "Lights 1/4 On");
+    assert.equal(dotTooltipLabel("bubble-sub-button area-dot-openings-on", rollups), "Entries 1/4 Open");
+    assert.equal(dotTooltipLabel("bubble-sub-button area-dot-media-empty", rollups), null);
+    assert.equal(dotTooltipLabel("bubble-sub-button area-dot-climate-empty", rollups), null);
+    const above = tooltipPosition({ left: 100, top: 80, width: 14, height: 14 }, { width: 120, height: 24 }, { width: 800, height: 600 });
+    assert.equal(above.top, 80 - 6 - 24);
+    assert.equal(above.left, 100 + 7 - 60);
+    const flipped = tooltipPosition({ left: 100, top: 2, width: 14, height: 14 }, { width: 120, height: 24 }, { width: 800, height: 600 });
+    assert.equal(flipped.top, 2 + 14 + 6);
+    const clamped = tooltipPosition({ left: 780, top: 80, width: 14, height: 14 }, { width: 120, height: 24 }, { width: 800, height: 600 });
+    assert.equal(clamped.left, 800 - 4 - 120);
 
     const openingCover = sectionRollups(
       { ...emptySections(), openings: ["cover.shade"] },
@@ -866,3 +878,4 @@ describe("stripRoomName", () => {
     assert.equal(button.name, "Man Cave");
   });
 });
+
