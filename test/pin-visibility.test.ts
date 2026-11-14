@@ -13,8 +13,8 @@ const AREA = "kitchen";
 const TV = "media_player.tv";
 const NOW = 1_700_000_000_000;
 
-function whenOn(ids: string[], always: string[] = []): AreaPins {
-  return { always, whenOn: ids };
+function whenOn(ids: string[], always: string[] = [], background: string[] = []): AreaPins {
+  return { always, whenOn: ids, background };
 }
 
 function sample(state: string): (entityId: string) => string {
@@ -28,7 +28,7 @@ function sticky(entityId: string, state: PinStickyState, areaId = AREA): Map<str
 describe("visiblePinnedIds", () => {
   it("treats a legacy string array as always, even while off", () => {
     const pins = parseAreaPins('["light.a","switch.b"]');
-    assert.deepEqual(pins, { always: ["light.a", "switch.b"], whenOn: [] });
+    assert.deepEqual(pins, { always: ["light.a", "switch.b"], whenOn: [], background: [] });
     const visible = visiblePinnedIds(pins, sample("off"), new Map(), AREA, NOW);
     assert.deepEqual(visible.ids, ["light.a", "switch.b"]);
     assert.equal(visible.sticky.size, 0);
@@ -116,9 +116,20 @@ describe("visiblePinnedIds", () => {
     assert.equal(off.sticky.get(pinStickyKey(AREA, "light.a"))?.until, offAt + PIN_STICKY_MS);
   });
 
+  it("does not show a background camera as a pinned row", () => {
+    const visible = visiblePinnedIds(
+      { always: ["light.a"], whenOn: ["switch.b"], background: ["camera.webcam"] },
+      sample("on"),
+      new Map(),
+      AREA,
+      NOW,
+    );
+    assert.deepEqual(visible.ids, ["light.a", "switch.b"]);
+  });
+
   it("drops sticky for an entity that is no longer while-on", () => {
     const visible = visiblePinnedIds(
-      { always: [TV], whenOn: [] },
+      { always: [TV], whenOn: [], background: [] },
       sample("paused"),
       sticky(TV, { active: true }),
       AREA,

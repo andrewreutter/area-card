@@ -13,7 +13,7 @@ import {
   subscribeUserData,
 } from "../src/user-data";
 
-const emptyPins = (): AreaPins => ({ always: [], whenOn: [] });
+const emptyPins = (): AreaPins => ({ always: [], whenOn: [], background: [] });
 
 interface StorageMock {
   getItem(key: string): string | null;
@@ -157,6 +157,7 @@ describe("frontend user data", { concurrency: 1 }, () => {
     assert.deepEqual(cachedPins("kitchen"), {
       always: ["light.kitchen"],
       whenOn: ["media_player.tv"],
+      background: [],
     });
     assert.deepEqual(cachedPins("missing"), emptyPins());
     assert.equal(cachedFloorExpanded("down"), false);
@@ -184,7 +185,7 @@ describe("frontend user data", { concurrency: 1 }, () => {
     assert.deepEqual(heard, [pinnedKey("kitchen")]);
     harness.emit({ [pinnedKey("kitchen")]: ["light.b"] });
     assert.deepEqual(heard, [pinnedKey("kitchen"), pinnedKey("kitchen")]);
-    assert.deepEqual(cachedPins("kitchen"), { always: ["light.b"], whenOn: [] });
+    assert.deepEqual(cachedPins("kitchen"), { always: ["light.b"], whenOn: [], background: [] });
     harness.emit({});
     assert.deepEqual(heard, [pinnedKey("kitchen"), pinnedKey("kitchen"), pinnedKey("kitchen")]);
     assert.deepEqual(cachedPins("kitchen"), emptyPins());
@@ -222,8 +223,8 @@ describe("frontend user data", { concurrency: 1 }, () => {
     assert.equal(store.getItem(floorExpandedKey("down")), null);
     assert.equal(store.getItem(floorExpandedKey("attic")), null);
     assert.equal(store.getItem("theme"), "dark");
-    assert.deepEqual(cachedPins("kitchen"), { always: ["light.desk"], whenOn: ["media_player.tv"] });
-    assert.deepEqual(cachedPins("office"), { always: ["switch.office"], whenOn: [] });
+    assert.deepEqual(cachedPins("kitchen"), { always: ["light.desk"], whenOn: ["media_player.tv"], background: [] });
+    assert.deepEqual(cachedPins("office"), { always: ["switch.office"], whenOn: [], background: [] });
     assert.equal(cachedFloorExpanded("down"), false);
     assert.equal(cachedFloorExpanded("attic"), true);
   });
@@ -244,7 +245,7 @@ describe("frontend user data", { concurrency: 1 }, () => {
     assert.equal(store.getItem(pinnedKey("kitchen")), null);
     assert.equal(store.getItem(pinnedKey("office")), null);
     assert.equal(store.getItem(floorExpandedKey("down")), null);
-    assert.deepEqual(cachedPins("kitchen"), { always: ["light.server"], whenOn: [] });
+    assert.deepEqual(cachedPins("kitchen"), { always: ["light.server"], whenOn: [], background: [] });
     assert.deepEqual(cachedPins("office"), emptyPins());
     assert.equal(cachedFloorExpanded("down"), false);
   });
@@ -274,7 +275,7 @@ describe("frontend user data", { concurrency: 1 }, () => {
     const pending = ensureUserData(harness.hass);
     harness.emit({ [pinnedKey("kitchen")]: ["light.a"] });
     await pending;
-    assert.deepEqual(cachedPins("kitchen"), { always: ["light.a"], whenOn: [] });
+    assert.deepEqual(cachedPins("kitchen"), { always: ["light.a"], whenOn: [], background: [] });
     assert.deepEqual(harness.calls, []);
   });
 
@@ -283,9 +284,9 @@ describe("frontend user data", { concurrency: 1 }, () => {
     const pending = ensureUserData(harness.hass);
     harness.emit({});
     await pending;
-    const always: AreaPins = { always: ["light.desk", "switch.lamp"], whenOn: [] };
+    const always: AreaPins = { always: ["light.desk", "switch.lamp"], whenOn: [], background: [] };
     await saveAreaPins(harness.hass, "office", always);
-    const mixed: AreaPins = { always: ["light.desk"], whenOn: ["media_player.tv"] };
+    const mixed: AreaPins = { always: ["light.desk"], whenOn: ["media_player.tv"], background: [] };
     await saveAreaPins(harness.hass, "office", mixed);
     assert.deepEqual(harness.calls[0], {
       type: "frontend/set_user_data",
@@ -328,10 +329,10 @@ describe("frontend user data", { concurrency: 1 }, () => {
     const heard: string[] = [];
     const stop = subscribeUserData((key) => heard.push(key));
     await assert.rejects(
-      saveAreaPins(harness.hass, "kitchen", { always: ["light.b"], whenOn: [] }),
+      saveAreaPins(harness.hass, "kitchen", { always: ["light.b"], whenOn: [], background: [] }),
       /set failed/,
     );
-    assert.deepEqual(cachedPins("kitchen"), { always: ["light.a"], whenOn: [] });
+    assert.deepEqual(cachedPins("kitchen"), { always: ["light.a"], whenOn: [], background: [] });
     assert.deepEqual(heard, []);
     assert.equal(harness.calls.at(-1)?.value && Array.isArray(harness.calls.at(-1)?.value), true);
     stop();
@@ -359,15 +360,15 @@ describe("frontend user data", { concurrency: 1 }, () => {
       [floorExpandedKey("down")]: false,
     });
     await pending;
-    const save = saveAreaPins(harness.hass, "kitchen", { always: ["light.sent"], whenOn: [] });
+    const save = saveAreaPins(harness.hass, "kitchen", { always: ["light.sent"], whenOn: [], background: [] });
     await flush();
     const pinsDuring = cachedPins("kitchen");
     const floorDuring = cachedFloorExpanded("down");
     release();
     await save;
-    assert.deepEqual(pinsDuring, { always: ["light.old"], whenOn: [] });
+    assert.deepEqual(pinsDuring, { always: ["light.old"], whenOn: [], background: [] });
     assert.equal(floorDuring, true);
-    assert.deepEqual(cachedPins("kitchen"), { always: ["light.sent"], whenOn: [] });
+    assert.deepEqual(cachedPins("kitchen"), { always: ["light.sent"], whenOn: [], background: [] });
     assert.equal(cachedFloorExpanded("down"), true);
   });
 
@@ -389,8 +390,8 @@ describe("frontend user data", { concurrency: 1 }, () => {
     const pending = ensureUserData(harness.hass);
     harness.emit({});
     await pending;
-    const pinsA: AreaPins = { always: ["light.a"], whenOn: [] };
-    const pinsB: AreaPins = { always: [], whenOn: ["light.a"] };
+    const pinsA: AreaPins = { always: ["light.a"], whenOn: [], background: [] };
+    const pinsB: AreaPins = { always: [], whenOn: ["light.a"], background: [] };
     const first = saveAreaPins(harness.hass, "kitchen", pinsA);
     try {
       await flush();
@@ -414,7 +415,7 @@ describe("frontend user data", { concurrency: 1 }, () => {
     await ensureUserData(bare);
     assert.deepEqual(cachedPins("kitchen"), emptyPins());
     assert.equal(cachedFloorExpanded("down"), true);
-    await assert.rejects(saveAreaPins(bare, "kitchen", { always: ["light.a"], whenOn: [] }), /unavailable/);
+    await assert.rejects(saveAreaPins(bare, "kitchen", { always: ["light.a"], whenOn: [], background: [] }), /unavailable/);
     await assert.rejects(saveFloorExpanded(bare, "down", false), /unavailable/);
     assert.deepEqual(cachedPins("kitchen"), emptyPins());
     assert.equal(cachedFloorExpanded("down"), true);
@@ -438,7 +439,7 @@ describe("frontend user data", { concurrency: 1 }, () => {
     await ensureUserData(hass as unknown as ClassifierHass);
     await ensureUserData(hass as unknown as ClassifierHass);
     assert.deepEqual(calls, [{ type: "frontend/get_user_data" }]);
-    assert.deepEqual(cachedPins("kitchen"), { always: ["light.a"], whenOn: [] });
+    assert.deepEqual(cachedPins("kitchen"), { always: ["light.a"], whenOn: [], background: [] });
     assert.equal(cachedFloorExpanded("down"), false);
   });
 
@@ -459,7 +460,7 @@ describe("frontend user data", { concurrency: 1 }, () => {
     const pending = ensureUserData(first);
     calls[0]({ value: { [pinnedKey("kitchen")]: ["light.a"] } });
     await pending;
-    assert.deepEqual(cachedPins("kitchen"), { always: ["light.a"], whenOn: [] });
+    assert.deepEqual(cachedPins("kitchen"), { always: ["light.a"], whenOn: [], background: [] });
     const heard: string[] = [];
     subscribeUserData((key) => heard.push(key));
     const second = { user: { id: "user-b" }, connection, callWS } as unknown as ClassifierHass;
@@ -472,6 +473,6 @@ describe("frontend user data", { concurrency: 1 }, () => {
     assert.deepEqual(cachedPins("kitchen"), emptyPins());
     calls[1]({ value: { [pinnedKey("kitchen")]: ["light.b"] } });
     await next;
-    assert.deepEqual(cachedPins("kitchen"), { always: ["light.b"], whenOn: [] });
+    assert.deepEqual(cachedPins("kitchen"), { always: ["light.b"], whenOn: [], background: [] });
   });
 });

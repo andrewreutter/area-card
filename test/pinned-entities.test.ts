@@ -27,13 +27,14 @@ describe("pinnedKey", () => {
   });
 });
 
-const emptyPins = (): AreaPins => ({ always: [], whenOn: [] });
+const emptyPins = (): AreaPins => ({ always: [], whenOn: [], background: [] });
 
 describe("parseAreaPins", () => {
   it("treats a legacy JSON array of entity ids as always", () => {
     assert.deepEqual(parseAreaPins('["light.a","switch.b"]'), {
       always: ["light.a", "switch.b"],
       whenOn: [],
+      background: [],
     });
   });
 
@@ -41,13 +42,14 @@ describe("parseAreaPins", () => {
     assert.deepEqual(parseAreaPins('["light.a","",1,null,"switch.b",false,{"id":"","mode":"when-on"},{"mode":"when-on"},{"id":1,"mode":"when-on"},{"id":"light.c","mode":"hidden"}]'), {
       always: ["light.a", "switch.b"],
       whenOn: [],
+      background: [],
     });
   });
 
   it("reads while-on objects and mode always objects", () => {
     assert.deepEqual(
       parseAreaPins('[{"id":"media_player.tv","mode":"when-on"},{"id":"light.desk","mode":"always"},"switch.lamp"]'),
-      { always: ["light.desk", "switch.lamp"], whenOn: ["media_player.tv"] },
+      { always: ["light.desk", "switch.lamp"], whenOn: ["media_player.tv"], background: [] },
     );
   });
 
@@ -64,6 +66,7 @@ describe("parseAreaPins", () => {
     assert.deepEqual(parseAreaPins(raw), {
       always: ["light.b", "light.d", "switch.e"],
       whenOn: ["light.a"],
+      background: [],
     });
   });
 
@@ -83,6 +86,7 @@ describe("parseAreaPins", () => {
     assert.deepEqual(parseAreaPins(["light.desk", { id: "media_player.tv", mode: "when-on" }]), {
       always: ["light.desk"],
       whenOn: ["media_player.tv"],
+      background: [],
     });
     assert.deepEqual(
       parseAreaPins([
@@ -90,7 +94,7 @@ describe("parseAreaPins", () => {
         { id: "light.a", mode: "when-on" },
         { id: "switch.b", mode: "always" },
       ]),
-      { always: ["switch.b"], whenOn: ["light.a"] },
+      { always: ["switch.b"], whenOn: ["light.a"], background: [] },
     );
   });
 });
@@ -98,10 +102,10 @@ describe("parseAreaPins", () => {
 describe("serializeAreaPins", () => {
   it("uses strings only when every pin is always", () => {
     const cases: AreaPins[] = [
-      { always: ["light.desk", "switch.lamp"], whenOn: [] },
-      { always: ["light.desk"], whenOn: ["media_player.tv"] },
-      { always: [], whenOn: ["media_player.tv"] },
-      { always: [], whenOn: [] },
+      { always: ["light.desk", "switch.lamp"], whenOn: [], background: [] },
+      { always: ["light.desk"], whenOn: ["media_player.tv"], background: [] },
+      { always: [], whenOn: ["media_player.tv"], background: [] },
+      { always: [], whenOn: [], background: [] },
     ];
     assert.deepEqual(serializeAreaPins(cases[0]), ["light.desk", "switch.lamp"]);
     assert.deepEqual(serializeAreaPins(cases[1]), ["light.desk", { id: "media_player.tv", mode: "when-on" }]);
@@ -113,33 +117,88 @@ describe("serializeAreaPins", () => {
       assert.equal(typeof payload, "object");
     }
   });
+
+  it("stores a camera background as a mode object in the same array", () => {
+    const pins: AreaPins = {
+      always: ["light.desk"],
+      whenOn: ["media_player.tv"],
+      background: ["camera.webcam"],
+    };
+    const payload = serializeAreaPins(pins);
+    assert.deepEqual(payload, [
+      "light.desk",
+      { id: "media_player.tv", mode: "when-on" },
+      { id: "camera.webcam", mode: "background" },
+    ]);
+    const stored = payload[2];
+    assert.equal(typeof stored, "object");
+    assert.equal(typeof (stored as { mode: unknown }).mode, "string");
+    assert.equal((stored as { mode: string }).mode, "background");
+    assert.deepEqual(parseAreaPins(payload), pins);
+    assert.deepEqual(parseAreaPins([{ id: "camera.webcam", mode: "background" }]), {
+      always: [],
+      whenOn: [],
+      background: ["camera.webcam"],
+    });
+    assert.deepEqual(parseAreaPins([{ id: "camera.webcam", mode: JSON.stringify("background") }]), emptyPins());
+    const encoded = parseAreaPins(['{"id":"camera.webcam","mode":"background"}']);
+    assert.deepEqual(encoded.background, []);
+  });
 });
 
 describe("cyclePin", () => {
   it("cycles hidden to always, always to while on, and while on to hidden", () => {
-    let pins: AreaPins = { always: ["switch.b"], whenOn: [] };
+    let pins: AreaPins = { always: ["switch.b"], whenOn: [], background: [] };
     pins = cyclePin(pins, "light.a");
-    assert.deepEqual(pins, { always: ["switch.b", "light.a"], whenOn: [] });
+    assert.deepEqual(pins, { always: ["switch.b", "light.a"], whenOn: [], background: [] });
     assert.equal(pinMode(pins, "light.a"), "always");
     pins = cyclePin(pins, "light.a");
-    assert.deepEqual(pins, { always: ["switch.b"], whenOn: ["light.a"] });
+    assert.deepEqual(pins, { always: ["switch.b"], whenOn: ["light.a"], background: [] });
     assert.equal(pinMode(pins, "light.a"), "when-on");
     pins = cyclePin(pins, "light.a");
-    assert.deepEqual(pins, { always: ["switch.b"], whenOn: [] });
+    assert.deepEqual(pins, { always: ["switch.b"], whenOn: [], background: [] });
     assert.equal(pinMode(pins, "light.a"), "hidden");
   });
 
   it("appends a falling always pin after the current while-on ids", () => {
     assert.deepEqual(
       cyclePin({ always: ["light.a", "switch.b"], whenOn: ["media_player.tv"] }, "light.a"),
-      { always: ["switch.b"], whenOn: ["media_player.tv", "light.a"] },
+      { always: ["switch.b"], whenOn: ["media_player.tv", "light.a"], background: [] },
     );
   });
 
   it("drops every copy, then appends the id once", () => {
     const pins = { always: ["light.a", "switch.b", "light.a"], whenOn: ["light.a"] };
-    assert.deepEqual(cyclePin(pins, "light.a"), { always: ["switch.b"], whenOn: ["light.a"] });
+    assert.deepEqual(cyclePin(pins, "light.a"), { always: ["switch.b"], whenOn: ["light.a"], background: [] });
     assert.deepEqual(pins, { always: ["light.a", "switch.b", "light.a"], whenOn: ["light.a"] });
+  });
+
+  it("cycles a camera through background after hidden, and skips that step for other entities", () => {
+    let camera: AreaPins = emptyPins();
+    camera = cyclePin(camera, "camera.webcam");
+    assert.equal(pinMode(camera, "camera.webcam"), "background");
+    assert.deepEqual(camera, { always: [], whenOn: [], background: ["camera.webcam"] });
+    camera = cyclePin(camera, "camera.webcam");
+    assert.equal(pinMode(camera, "camera.webcam"), "always");
+    assert.deepEqual(camera, { always: ["camera.webcam"], whenOn: [], background: [] });
+    camera = cyclePin(camera, "camera.webcam");
+    assert.equal(pinMode(camera, "camera.webcam"), "when-on");
+    camera = cyclePin(camera, "camera.webcam");
+    assert.equal(pinMode(camera, "camera.webcam"), "hidden");
+    assert.deepEqual(camera, emptyPins());
+
+    let light: AreaPins = emptyPins();
+    const seen: string[] = [];
+    for (let step = 0; step < 4; step += 1) {
+      light = cyclePin(light, "light.desk");
+      seen.push(pinMode(light, "light.desk"));
+      assert.equal(light.background.includes("light.desk"), false);
+    }
+    assert.deepEqual(seen, ["always", "when-on", "hidden", "always"]);
+
+    const stuck = cyclePin({ always: [], whenOn: [], background: ["light.desk"] }, "light.desk");
+    assert.equal(pinMode(stuck, "light.desk"), "always");
+    assert.deepEqual(stuck.background, []);
   });
 });
 

@@ -240,6 +240,21 @@ describe("syncPinToggles", () => {
     assert.equal(cover.children.some((child) => child.classList.contains("area-card-pin-switch")), false);
   });
 
+  it("labels the camera background step like the other pin buttons", () => {
+    const camera = cellWith({ type: "picture-entity", entity: "camera.webcam" });
+    const { root } = grid([camera]);
+    syncPinToggles(root as unknown as ParentNode, {
+      editing: true,
+      modeOf: () => "background",
+      onCycle: () => {},
+    });
+    const button = camera.children[0];
+    assert.equal(button.dataset.pinMode, "background");
+    assert.equal(button.getAttribute("aria-label"), "Use as area background");
+    assert.equal(button.title, "Use as area background");
+    assert.equal(iconOf(button), "mdi:image");
+  });
+
   it("does not match the unprefixed bubble grid class", () => {
     const light = cellWith({ type: "custom:area-card-mushroom-entity-card", entity: "light.desk" });
     const root = {

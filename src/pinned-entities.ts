@@ -11,33 +11,50 @@ export function pinnedKey(areaId: string): string {
   return `${PINNED_KEY_PREFIX}${areaId}`;
 }
 
-export type PinMode = "hidden" | "always" | "when-on";
+export type PinMode = "hidden" | "background" | "always" | "when-on";
 
-/** Always pins and while-on pins for one area. An id is in at most one list. */
+/** Always pins, while-on pins, and camera background pins. An id is in at most one list. */
 export interface AreaPins {
   always: string[];
   whenOn: string[];
+  /** Cameras chosen as the collapsed card background. Not drawn as pinned rows. */
+  background: string[];
 }
+
+const CAMERA_CYCLE: readonly PinMode[] = ["hidden", "background", "always", "when-on"];
+const ENTITY_CYCLE: readonly PinMode[] = ["hidden", "always", "when-on"];
+
+type StoredMode = "always" | "when-on" | "background";
 
 function emptyPins(): AreaPins {
-  return { always: [], whenOn: [] };
+  return { always: [], whenOn: [], background: [] };
 }
 
-function pinEntry(entry: unknown): { id: string; mode: "always" | "when-on" } | null {
+function list(ids: readonly string[] | undefined): string[] {
+  return ids ? [...ids] : [];
+}
+
+export function isCameraEntity(entityId: string): boolean {
+  return entityId.split(".")[0] === "camera";
+}
+
+function pinEntry(entry: unknown): { id: string; mode: StoredMode } | null {
   if (typeof entry === "string") return entry.length > 0 ? { id: entry, mode: "always" } : null;
   if (typeof entry !== "object" || entry === null || Array.isArray(entry)) return null;
   const id = (entry as { id?: unknown }).id;
   const mode = (entry as { mode?: unknown }).mode;
   if (typeof id !== "string" || id.length === 0) return null;
-  if (mode === "when-on" || mode === "always") return { id, mode };
+  if (mode === "when-on" || mode === "always" || mode === "background") return { id, mode };
   return null;
 }
 
 /**
  * A JSON string is parsed, then treated like an array. An already-parsed array
- * uses the same rules. Strings are always-pins. `{ id, mode: "when-on" | "always" }`
- * is a pin object. The last entry for an id wins, in first-seen order, and that
- * id stays in only one list. Null, undefined, bad JSON, and non-arrays are empty.
+ * uses the same rules. Strings are always-pins. `{ id, mode: "when-on" | "always" | "background" }`
+ * is a pin object. `background` is the camera collapsed-card photo. The mode is
+ * that string, not a JSON string. The last entry for an id wins, in first-seen
+ * order, and that id stays in only one list. Null, undefined, bad JSON, and
+ * non-arrays are empty.
  */
 export function parseAreaPins(raw: unknown): AreaPins {
   let parsed: unknown = raw;
@@ -50,7 +67,7 @@ export function parseAreaPins(raw: unknown): AreaPins {
     }
   }
   if (!Array.isArray(parsed)) return emptyPins();
-  const modes = new Map<string, "always" | "when-on">();
+  const modes = new Map<string, StoredMode>();
   const order: string[] = [];
   for (const entry of parsed) {
     const pin = pinEntry(entry);
@@ -60,33 +77,53 @@ export function parseAreaPins(raw: unknown): AreaPins {
   }
   const pins = emptyPins();
   for (const id of order) {
-    if (modes.get(id) === "when-on") pins.whenOn.push(id);
+    const mode = modes.get(id);
+    if (mode === "when-on") pins.whenOn.push(id);
+    else if (mode === "background") pins.background.push(id);
     else pins.always.push(id);
   }
   return pins;
 }
 
 /** Stored pin value. Strings only when every pin is always. */
-export function serializeAreaPins(pins: AreaPins): Array<string | { id: string; mode: "when-on" }> {
-  if (pins.whenOn.length === 0) return [...pins.always];
-  return [...pins.always, ...pins.whenOn.map((id) => ({ id, mode: "when-on" as const }))];
+export function serializeAreaPins(
+  pins: AreaPins,
+): Array<string | { id: string; mode: "when-on" | "background" }> {
+  const whenOn = list(pins.whenOn);
+  const background = list(pins.background);
+  const always = list(pins.always);
+  if (whenOn.length === 0 && background.length === 0) return always;
+  return [
+    ...always,
+    ...whenOn.map((id) => ({ id, mode: "when-on" as const })),
+    ...background.map((id) => ({ id, mode: "background" as const })),
+  ];
 }
 
-/** Always if the id is in that list, otherwise while on, otherwise hidden. */
+/** Always, while on, or camera background. Anything else is hidden. */
 export function pinMode(pins: AreaPins, entityId: string): PinMode {
   if (pins.always.includes(entityId)) return "always";
   if (pins.whenOn.includes(entityId)) return "when-on";
+  if (list(pins.background).includes(entityId)) return "background";
   return "hidden";
 }
 
-/** Hidden becomes always, always becomes while on, and while on becomes hidden. */
+/**
+ * Cameras walk hidden, background, always, while on, then hidden.
+ * Other entities walk hidden, always, while on, then hidden, and never land on background.
+ */
 export function cyclePin(pins: AreaPins, entityId: string): AreaPins {
   const mode = pinMode(pins, entityId);
   const always = pins.always.filter((id) => id !== entityId);
   const whenOn = pins.whenOn.filter((id) => id !== entityId);
-  if (mode === "hidden") always.push(entityId);
-  else if (mode === "always") whenOn.push(entityId);
-  return { always, whenOn };
+  const background = list(pins.background).filter((id) => id !== entityId);
+  const order = isCameraEntity(entityId) ? CAMERA_CYCLE : ENTITY_CYCLE;
+  const index = order.indexOf(mode);
+  const next = order[((index === -1 ? 0 : index) + 1) % order.length];
+  if (next === "always") always.push(entityId);
+  else if (next === "when-on") whenOn.push(entityId);
+  else if (next === "background") background.push(entityId);
+  return { always, whenOn, background };
 }
 
 function nonEmptyString(value: unknown): string | null {

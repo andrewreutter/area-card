@@ -82,16 +82,24 @@ function sameIds(left: readonly string[], right: readonly string[]): boolean {
   return true;
 }
 
+function pinBackground(pins: AreaPins): readonly string[] {
+  return pins.background ?? [];
+}
+
 function pinsEqual(left: AreaPins, right: AreaPins): boolean {
-  return sameIds(left.always, right.always) && sameIds(left.whenOn, right.whenOn);
+  return (
+    sameIds(left.always, right.always) &&
+    sameIds(left.whenOn, right.whenOn) &&
+    sameIds(pinBackground(left), pinBackground(right))
+  );
 }
 
 function clonePins(pins: AreaPins): AreaPins {
-  return { always: [...pins.always], whenOn: [...pins.whenOn] };
+  return { always: [...pins.always], whenOn: [...pins.whenOn], background: [...pinBackground(pins)] };
 }
 
 function emptyObservablePins(): AreaPins {
-  return { always: [], whenOn: [] };
+  return { always: [], whenOn: [], background: [] };
 }
 
 /** Missing floors stay expanded, which is the card default. */
@@ -103,7 +111,7 @@ function floorBoolean(value: unknown): boolean {
 
 function departsFromDefault(entry: CacheEntry): boolean {
   if (entry.kind === "floor") return entry.expanded === false;
-  return entry.pins.always.length > 0 || entry.pins.whenOn.length > 0;
+  return entry.pins.always.length > 0 || entry.pins.whenOn.length > 0 || pinBackground(entry.pins).length > 0;
 }
 
 function notify(key: string): void {

@@ -6,12 +6,14 @@ const PIN_STYLE_ID = "area-card-pin-switch-style";
 
 const PIN_ICONS: Record<PinMode, string> = {
   hidden: "mdi:eye-off",
+  background: "mdi:image",
   always: "mdi:pin",
   "when-on": "mdi:eye-check",
 };
 
 const PIN_LABELS: Record<PinMode, string> = {
   hidden: "Hidden on the area card",
+  background: "Use as area background",
   always: "Always on the area card",
   "when-on": "On the area card while on",
 };

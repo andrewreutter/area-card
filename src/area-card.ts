@@ -1,6 +1,18 @@
 import { syncAutomationSubtitle } from "./automation-subtitle";
 import { loadDisabledAutomations } from "./automations";
-import { buildButtonConfig } from "./button-config";
+import { buildButtonConfig, type ButtonConfigInput } from "./button-config";
+import {
+  absoluteStreamUrl,
+  autoplayRejected,
+  cameraFrameReady,
+  cameraAccessToken,
+  createCameraStreamPlayer,
+  ensureCameraStreamPlayer,
+  hideCameraPlaybackControls,
+  installCameraStreamAuth,
+  primeCameraVideo,
+  type CameraStreamPlayer,
+} from "./camera-video";
 import { hideAreaDotTooltip, syncAreaDotTooltips, type DotTooltipSource } from "./dot-tooltip";
 import { ensureDeps } from "./ensure-deps";
 import "./floor-card";
@@ -26,9 +38,20 @@ import { syncPinToggles } from "./pin-toggles";
 import { visiblePinnedIds, type PinStickyState } from "./pin-visibility";
 import {
   buttonPictureSuppressStyles,
+  cameraEntityPicture,
+  cameraStreamPath,
+  cameraSupportsStream,
+  cameraVideoScrim,
+  clusterPictureWhileVideo,
+  CLUSTER_PICTURE_RADIUS,
   clusterPictureProperties,
+  collapsedCardPicture,
+  firstBackgroundCamera,
+  pictureAfterAutoplayFailure,
+  pictureAfterCameraLoad,
   picturePlacement,
   pinnedPictureSurfaceStyles,
+  type CameraPictureLoad,
 } from "./picture";
 import { buildPopupConfig } from "./popup-cards";
 import { areaSettingsPath, ensureHeaderButtons } from "./popup-chrome";
@@ -252,8 +275,23 @@ class AreaCard extends HTMLElement {
   private pinEditEl?: HTMLButtonElement;
   private areaEditEl?: HTMLButtonElement;
   private pinnedEl?: HTMLElement;
-  /** Area photo from the last render. A pin toggle does not rebuild the button. */
+  /** Photo painted on the collapsed card. The popup keeps the area picture. */
   private areaPicture: string | null = null;
+  /** Area picture from the registry. A camera background does not replace the popup. */
+  private areaPhoto: string | null = null;
+  private cameraOrder: readonly string[] = [];
+  private buttonInput?: ButtonConfigInput;
+  private cameraLoads = new Map<string, CameraPictureLoad>();
+  /** Last still that loaded for a camera, held while a refreshed URL is loading. */
+  private heldCamera: { entityId: string; url: string } | null = null;
+  /** Live HLS background. Failed stays failed until the chosen camera changes. */
+  private streamState: { entityId: string; phase: "pending" | "playing" | "failed" } | null = null;
+  private streamGeneration = 0;
+  private streamTimer = 0;
+  private resumeTimer = 0;
+  /** The video element was created and did not start. The area picture stays up. */
+  private autoplayFailed = false;
+  private videoPlayer?: CameraStreamPlayer;
   private pinnedRowsVisible = false;
   private popupCards: readonly Record<string, unknown>[] = [];
   private pinnedConfigKey = new WeakMap<HTMLElement, string>();
@@ -321,6 +359,7 @@ class AreaCard extends HTMLElement {
   }
 
   disconnectedCallback(): void {
+    this.stopCameraVideo();
     this.unsubscribeUserData?.();
     this.unsubscribeUserData = undefined;
     window.removeEventListener("resize", this.onResize);
@@ -364,7 +403,10 @@ class AreaCard extends HTMLElement {
     const sections = classifyArea(hass, areaId);
     const disabled = await loadDisabledAutomations(hass, sections.automations);
     if (!this._config || this._hass !== hass || this._config.area !== areaId) return;
-    this.areaPicture = picture;
+    this.areaPhoto = picture;
+    this.cameraOrder = sections.cameras;
+    const shownPicture = this.resolveCollapsedPicture(hass, areaId);
+    this.areaPicture = shownPicture;
     const hide = this._config.hide_sections;
     const unavailable = areaUnavailable(hass, areaId, disabled);
     const visibleSections = withoutSections(sections, hide);
@@ -381,19 +423,20 @@ class AreaCard extends HTMLElement {
     };
     const viewportWidth = window.innerWidth;
     this.lastViewport = viewportWidth;
-    const buttonConfig = buildButtonConfig({
+    this.buttonInput = {
       areaId,
       name,
       icon,
       sections: visibleSections,
       states,
       dotSlots: collapsedDotSlots(hide),
-      picture,
+      picture: shownPicture,
       unavailable,
       disabledAutomations: disabled,
       alignDots: !!this.closest("floor-card"),
       formatEntityState: formatState,
-    });
+    };
+    const buttonConfig = buildButtonConfig(this.buttonInput);
     const popupConfig = buildPopupConfig(areaId, name, icon, visibleSections, states, picture, disabled, {
       viewportWidth,
       formatEntityState: formatState,
@@ -616,6 +659,9 @@ class AreaCard extends HTMLElement {
   }
 
   private syncPinnedRow(hass: ClassifierHass, areaId: string): void {
+    const shown = this.resolveCollapsedPicture(hass, areaId);
+    this.applyShownPicture(hass, shown);
+    this.syncCameraVideo(hass, areaId);
     const host = this.pinnedHost();
     const now = Date.now();
     const pins = cachedPins(areaId);
@@ -808,17 +854,295 @@ class AreaCard extends HTMLElement {
   }
 
   /**
+   * Still under the collapsed card, and the fallback when the camera video is
+   * missing or fails. The popup is built with the area picture.
+   * The first camera in area order wins. No still, or a still that fails to
+   * load, leaves the area picture in place.
+   */
+  private resolveCollapsedPicture(hass: ClassifierHass, areaId: string): string | null {
+    const area = this.areaPhoto && this.areaPhoto.length > 0 ? this.areaPhoto : null;
+    const background = cachedPins(areaId).background ?? [];
+    const chosen = firstBackgroundCamera(this.cameraOrder, background);
+    const candidate = collapsedCardPicture(area, this.cameraOrder, background, (id) => {
+      const raw = cameraEntityPicture(hass.states?.[id]);
+      if (!raw) return null;
+      return typeof hass.hassUrl === "function" ? hass.hassUrl(raw) : raw;
+    });
+    const cameraUrl = candidate && candidate !== area ? candidate : null;
+    if (!cameraUrl || !chosen) {
+      this.heldCamera = null;
+      return area;
+    }
+    if (!this.cameraLoads.has(cameraUrl)) this.probeCamera(cameraUrl, areaId);
+    const load = this.cameraLoads.get(cameraUrl);
+    const held = this.heldCamera?.entityId === chosen ? this.heldCamera.url : null;
+    const shown = pictureAfterCameraLoad(area, cameraUrl, load, held);
+    if (load === "loaded") this.heldCamera = { entityId: chosen, url: cameraUrl };
+    else if (load === "failed") this.heldCamera = null;
+    return pictureAfterAutoplayFailure(area, this.autoplayFailed, shown);
+  }
+
+  private probeCamera(url: string, areaId: string): void {
+    this.cameraLoads.set(url, "pending");
+    const image = new Image();
+    const finish = (status: "loaded" | "failed") => {
+      this.cameraLoads.set(url, status);
+      queueMicrotask(() => {
+        if (!this.isConnected || this._config?.area !== areaId) return;
+        const hass = this._hass;
+        if (!hass) return;
+        const shown = this.resolveCollapsedPicture(hass, areaId);
+        const previous = this.areaPicture;
+        this.applyShownPicture(hass, shown);
+        if (shown !== previous) this.syncPicturePlacement(this.pinnedRowsVisible);
+      });
+    };
+    image.onload = () => finish("loaded");
+    image.onerror = () => finish("failed");
+    image.src = url;
+  }
+
+  /** Rebuilds the collapsed button when its photo changes. The popup config is left alone. */
+  private applyShownPicture(hass: ClassifierHass, shown: string | null): void {
+    if (shown === this.areaPicture) return;
+    this.areaPicture = shown;
+    if (!this.buttonInput || !this.buttonEl) return;
+    this.buttonInput = { ...this.buttonInput, picture: shown };
+    const buttonConfig = buildButtonConfig(this.buttonInput);
+    const buttonKey = JSON.stringify(buttonConfig);
+    if (this.buttonKey === buttonKey) return;
+    this.buttonEl.setConfig?.(buttonConfig);
+    this.buttonKey = buttonKey;
+    this.buttonEl.hass = hass;
+  }
+
+  private cameraVideoCovers(): boolean {
+    const phase = this.streamState?.phase;
+    return phase === "pending" || phase === "playing";
+  }
+
+  /** Start the chosen camera's muted HLS video, or leave the still in place. */
+  private syncCameraVideo(hass: ClassifierHass, areaId: string): void {
+    const chosen = firstBackgroundCamera(this.cameraOrder, cachedPins(areaId).background ?? []);
+    if (!chosen || !cameraSupportsStream(hass.states?.[chosen])) {
+      this.stopCameraVideo();
+      return;
+    }
+    if (this.streamState?.entityId === chosen) return;
+    this.startCameraVideo(hass, areaId, chosen);
+  }
+
+  private stopCameraVideo(): void {
+    if (!this.streamState && !this.videoPlayer && !this.streamTimer && !this.resumeTimer) return;
+    this.streamGeneration += 1;
+    this.clearStreamTimers();
+    this.autoplayFailed = false;
+    this.streamState = null;
+    this.videoPlayer?.remove();
+    this.videoPlayer = undefined;
+    this.querySelector(".area-card-camera-video")?.remove();
+  }
+
+  private clearStreamTimers(): void {
+    window.clearTimeout(this.streamTimer);
+    window.clearTimeout(this.resumeTimer);
+    this.streamTimer = 0;
+    this.resumeTimer = 0;
+  }
+
+  private startCameraVideo(hass: ClassifierHass, areaId: string, entityId: string): void {
+    const generation = ++this.streamGeneration;
+    this.clearStreamTimers();
+    this.autoplayFailed = false;
+    this.videoPlayer?.remove();
+    this.videoPlayer = undefined;
+    this.streamState = { entityId, phase: "pending" };
+    void this.openCameraVideo(hass, areaId, entityId, generation);
+  }
+
+  private failCameraVideo(entityId: string, generation: number): void {
+    if (generation !== this.streamGeneration) return;
+    this.clearStreamTimers();
+    this.videoPlayer?.remove();
+    this.videoPlayer = undefined;
+    this.streamState = { entityId, phase: "failed" };
+    const hass = this._hass;
+    const areaId = this._config?.area;
+    if (hass && areaId) this.applyShownPicture(hass, this.resolveCollapsedPicture(hass, areaId));
+    this.syncPicturePlacement(this.pinnedRowsVisible);
+  }
+
+  /**
+   * Play the HLS playlist Home Assistant already serves. The player is muted
+   * and started with play() once its video element is connected. If that start
+   * is refused, the area picture stays and the player is removed.
+   */
+  private async openCameraVideo(
+    hass: ClassifierHass,
+    areaId: string,
+    entityId: string,
+    generation: number,
+  ): Promise<void> {
+    const current = () =>
+      generation === this.streamGeneration && this.isConnected && this._config?.area === areaId;
+    try {
+      if (typeof hass.callWS !== "function") {
+        this.failCameraVideo(entityId, generation);
+        return;
+      }
+      installCameraStreamAuth(() => cameraAccessToken(this._hass));
+      const call = hass.callWS as (message: Record<string, unknown>) => Promise<unknown>;
+      const result = await call({ type: "camera/stream", entity_id: entityId, format: "hls" });
+      if (!current()) return;
+      const path = cameraStreamPath(result);
+      if (!path) {
+        this.failCameraVideo(entityId, generation);
+        return;
+      }
+      const absolute = absoluteStreamUrl(path, (value) =>
+        typeof hass.hassUrl === "function" ? hass.hassUrl(value) : value,
+      );
+      const ready = await ensureCameraStreamPlayer();
+      if (!current()) return;
+      if (!ready) {
+        this.failCameraVideo(entityId, generation);
+        return;
+      }
+      const player = createCameraStreamPlayer(entityId);
+      this.videoPlayer = player;
+      this.streamTimer = window.setTimeout(() => {
+        if (generation !== this.streamGeneration || this.streamState?.phase === "playing") return;
+        this.autoplayFailed = true;
+        this.failCameraVideo(entityId, generation);
+      }, 12_000);
+      this.syncPicturePlacement(this.pinnedRowsVisible);
+      player.url = absolute;
+      this.armCameraPlayback(player, entityId, generation);
+    } catch {
+      this.failCameraVideo(entityId, generation);
+    }
+  }
+
+  /** Mute, hide the start control, and call play() until the stream is actually running. */
+  private armCameraPlayback(player: CameraStreamPlayer, entityId: string, generation: number): void {
+    let starting = false;
+    const markPlaying = () => {
+      if (generation !== this.streamGeneration || this.streamState?.phase === "failed") return;
+      window.clearTimeout(this.streamTimer);
+      this.streamTimer = 0;
+      if (this.streamState?.phase === "playing") return;
+      this.streamState = { entityId, phase: "playing" };
+      this.syncPicturePlacement(this.pinnedRowsVisible);
+    };
+    const tick = () => {
+      if (generation !== this.streamGeneration || this.streamState?.phase === "failed") return;
+      hideCameraPlaybackControls(player);
+      const video = primeCameraVideo(player);
+      if (cameraFrameReady(video)) {
+        markPlaying();
+        this.resumeTimer = window.setTimeout(tick, 1000);
+        return;
+      }
+      if (this.streamState?.phase === "playing") {
+        this.streamState = { entityId, phase: "pending" };
+        this.syncPicturePlacement(this.pinnedRowsVisible);
+      }
+      if (video && !starting) {
+        starting = true;
+        const attempt = video.play();
+        if (attempt && typeof attempt.then === "function") {
+          void attempt.then(
+            () => {
+              starting = false;
+              if (cameraFrameReady(video)) markPlaying();
+            },
+            (error: unknown) => {
+              starting = false;
+              if (generation !== this.streamGeneration || !autoplayRejected(error)) return;
+              this.autoplayFailed = true;
+              this.failCameraVideo(entityId, generation);
+            },
+          );
+        } else starting = false;
+      }
+      this.resumeTimer = window.setTimeout(tick, 200);
+    };
+    window.clearTimeout(this.resumeTimer);
+    tick();
+  }
+
+  /** Video layer under the button and pinned rows. Hidden until a frame is playing. */
+  private mountCameraVideo(cluster: HTMLElement): void {
+    const player = this.videoPlayer;
+    const covers = this.cameraVideoCovers();
+    const found = cluster.querySelector(":scope > .area-card-camera-video");
+    if (!covers || !player) {
+      if (found instanceof HTMLElement) found.remove();
+      this.raiseCollapsedContent(false);
+      return;
+    }
+    const layer = found instanceof HTMLElement ? found : this.createCameraVideoLayer();
+    if (layer.parentElement !== cluster) cluster.prepend(layer);
+    const scrim = layer.querySelector(".area-card-camera-scrim");
+    if (scrim instanceof HTMLElement) scrim.style.backgroundImage = cameraVideoScrim(this.pinnedRowsVisible);
+    if (player.parentElement !== layer) {
+      if (scrim) layer.insertBefore(player, scrim);
+      else layer.append(player);
+    }
+    layer.style.opacity = this.streamState?.phase === "playing" ? "1" : "0";
+    this.raiseCollapsedContent(true);
+  }
+
+  private createCameraVideoLayer(): HTMLElement {
+    const layer = document.createElement("div");
+    layer.className = "area-card-camera-video";
+    layer.setAttribute("aria-hidden", "true");
+    layer.style.position = "absolute";
+    layer.style.inset = "0";
+    layer.style.zIndex = "0";
+    layer.style.pointerEvents = "none";
+    layer.style.overflow = "hidden";
+    layer.style.borderRadius = CLUSTER_PICTURE_RADIUS;
+    const scrim = document.createElement("div");
+    scrim.className = "area-card-camera-scrim";
+    scrim.style.position = "absolute";
+    scrim.style.inset = "0";
+    layer.append(scrim);
+    return layer;
+  }
+
+  private raiseCollapsedContent(above: boolean): void {
+    for (const el of [this.buttonEl, this.pinnedEl]) {
+      if (!el) continue;
+      if (above) {
+        el.style.position = "relative";
+        el.style.zIndex = "1";
+      } else {
+        el.style.removeProperty("position");
+        el.style.removeProperty("z-index");
+      }
+    }
+  }
+
+  /**
    * One photo behind the area button and the pinned rows while any pinned row
-   * is showing. With none showing, the button keeps the picture it already has.
+   * is showing. A camera video uses that same cluster, with the still underneath
+   * until a frame is playing. With neither, the button keeps its picture.
    */
   private syncPicturePlacement(pinnedRowsVisible: boolean): void {
     this.pinnedRowsVisible = pinnedRowsVisible;
+    const videoCovers = this.cameraVideoCovers();
+    const videoPlaying = this.streamState?.phase === "playing";
     const placement = picturePlacement(this.areaPicture, pinnedRowsVisible);
     const cluster = this.ensurePictureCluster();
     if (cluster && cluster !== this) {
       this.applyClusterLayout(cluster);
-      if (placement === "cluster" && this.areaPicture) {
-        const props = clusterPictureProperties(this.areaPicture);
+      const underVideo = clusterPictureWhileVideo(
+        videoPlaying,
+        placement === "cluster" || videoCovers ? this.areaPicture : null,
+      );
+      if (underVideo) {
+        const props = clusterPictureProperties(underVideo);
         cluster.style.setProperty("background-image", props["background-image"]);
         cluster.style.setProperty("background-size", props["background-size"]);
         cluster.style.setProperty("background-position", props["background-position"]);
@@ -831,8 +1155,9 @@ class AreaCard extends HTMLElement {
         cluster.style.removeProperty("border-radius");
         cluster.style.removeProperty("--ha-card-backdrop-filter");
       }
+      this.mountCameraVideo(cluster);
     }
-    this.syncButtonPictureSuppress(placement === "cluster");
+    this.syncButtonPictureSuppress(placement === "cluster" || videoCovers);
     const host = this.pinnedEl;
     if (!host) return;
     for (const card of host.querySelectorAll<HTMLElement>("[data-pin-entity]")) {
@@ -847,12 +1172,19 @@ class AreaCard extends HTMLElement {
     if (!button || !pinned) return null;
     const popup = this.popupEl;
     const current = button.parentElement;
+    const content = current
+      ? [...current.children].filter(
+          (node) => !(node instanceof HTMLElement && node.classList.contains("area-card-camera-video")),
+        )
+      : [];
     if (
       current &&
       current !== this &&
       pinned.parentElement === current &&
       !(popup && current.contains(popup)) &&
-      current.childElementCount === 2
+      content.length === 2 &&
+      content[0] === button &&
+      content[1] === pinned
     ) {
       return current;
     }
@@ -889,6 +1221,7 @@ class AreaCard extends HTMLElement {
     cluster.style.margin = "0";
     cluster.style.padding = "0";
     cluster.style.gap = "0";
+    cluster.style.position = "relative";
     // The photo's own background clips to the cluster radius. overflow:hidden
     // here would also clip a tall pinned card (a light slider, a media player).
     cluster.style.removeProperty("overflow");
@@ -919,7 +1252,7 @@ class AreaCard extends HTMLElement {
     if (apply()) return;
     let tries = 0;
     const tick = () => {
-      if (picturePlacement(this.areaPicture, this.pinnedRowsVisible) !== "cluster") {
+      if (picturePlacement(this.areaPicture, this.pinnedRowsVisible) !== "cluster" && !this.cameraVideoCovers()) {
         button.shadowRoot?.querySelector("#area-card-picture-suppress")?.remove();
         return;
       }
