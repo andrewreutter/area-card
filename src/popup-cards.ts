@@ -118,6 +118,11 @@ export function buildPopupCards(
   );
 
   add(
+    "cameras",
+    sections.cameras.map((entity) => cameraCard(entity, states, roomName)),
+  );
+
+  add(
     "switches",
     sections.switches.map((entity) =>
       entityCard(entity, states, roomName, rows, {
@@ -276,6 +281,32 @@ function titleCard(id: RollupId | "status"): Record<string, unknown> {
     color: heading.color,
     grid_options: FULL,
   };
+}
+
+function cameraCard(
+  entity: string,
+  states: Record<string, EntityState>,
+  roomName: string,
+): Record<string, unknown> {
+  return named(
+    {
+      type: "picture-entity",
+      entity,
+      camera_image: entity,
+      camera_view: "auto",
+      show_name: true,
+      show_state: true,
+      aspect_ratio: "16:9",
+      fit_mode: "contain",
+      tap_action: { action: "more-info" },
+      hold_action: { action: "none" },
+      double_tap_action: { action: "none" },
+      grid_options: FULL,
+    },
+    entity,
+    states,
+    roomName,
+  );
 }
 
 function entityCard(

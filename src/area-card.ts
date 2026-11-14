@@ -5,7 +5,6 @@ import { hideAreaDotTooltip, syncAreaDotTooltips, type DotTooltipSource } from "
 import { ensureDeps } from "./ensure-deps";
 import "./floor-card";
 import "./floors-card";
-import { browserStorage } from "./floor-state";
 import "./light-row";
 import "./section-title";
 import {
@@ -14,13 +13,12 @@ import {
   pinEntityId,
   pinMode,
   pinnedEdgeRadius,
+  pinnedKey,
   pinnedRowsSideBySide,
   pinnedSideBySideGridStyles,
   pinnedSideBySideHostStyles,
   pinnedSideBySideStyles,
-  readAreaPins,
   selectPinnedCards,
-  writeAreaPins,
   type PinnedEdge,
   type PinnedLayoutWidth,
 } from "./pinned-entities";
@@ -37,6 +35,7 @@ import { areaSettingsPath, ensureHeaderButtons } from "./popup-chrome";
 import { collapsedDotSlots, parseHideSections, ROLLUP_ORDER, sectionRollups, sectionTitle, type RollupId, type SectionRollup, withoutSections } from "./rollups";
 import { areaDisplay, areaUnavailable, classifyArea, membershipKey, type ClassifierHass } from "./sections";
 import { BUBBLE_ELEMENT } from "./tags";
+import { cachedPins, ensureUserData, saveAreaPins, subscribeUserData } from "./user-data";
 
 interface AreaCardConfig {
   area: string;
@@ -260,6 +259,7 @@ class AreaCard extends HTMLElement {
   private pinnedConfigKey = new WeakMap<HTMLElement, string>();
   private resizeTimer = 0;
   private lastViewport = 0;
+  private unsubscribeUserData?: () => void;
   private readonly onResize = () => {
     const width = window.innerWidth;
     if (width === this.lastViewport) return;
@@ -309,10 +309,20 @@ class AreaCard extends HTMLElement {
   connectedCallback(): void {
     this.style.display = "block";
     window.addEventListener("resize", this.onResize);
+    this.unsubscribeUserData?.();
+    this.unsubscribeUserData = subscribeUserData((key: string) => {
+      const hass = this._hass;
+      const areaId = this._config?.area;
+      if (!hass || !areaId || key !== pinnedKey(areaId)) return;
+      this.syncPinnedRow(hass, areaId);
+      this.applyAreaEdit();
+    });
     this.schedule();
   }
 
   disconnectedCallback(): void {
+    this.unsubscribeUserData?.();
+    this.unsubscribeUserData = undefined;
     window.removeEventListener("resize", this.onResize);
     window.clearTimeout(this.resizeTimer);
     window.clearTimeout(this.pinStickyTimer);
@@ -344,11 +354,12 @@ class AreaCard extends HTMLElement {
 
   private async render(): Promise<void> {
     if (!this._config || !this._hass) return;
-    await ensureDeps();
-    if (!this._config || !this._hass) return;
-
     const hass = this._hass;
     const areaId = this._config.area;
+    await ensureUserData(hass);
+    if (!this._config || this._hass !== hass || this._config.area !== areaId) return;
+    await ensureDeps();
+    if (!this._config || this._hass !== hass || this._config.area !== areaId) return;
     const { name, icon, picture } = areaDisplay(hass, areaId);
     const sections = classifyArea(hass, areaId);
     const disabled = await loadDisabledAutomations(hass, sections.automations);
@@ -529,7 +540,7 @@ class AreaCard extends HTMLElement {
     }
     syncPinToggles(root, {
       editing: this.pinEditing,
-      modeOf: (entityId) => pinMode(readAreaPins(browserStorage(), areaId), entityId),
+      modeOf: (entityId) => pinMode(cachedPins(areaId), entityId),
       onCycle: (entityId) => this.pinCycled(areaId, entityId),
     });
   }
@@ -569,11 +580,19 @@ class AreaCard extends HTMLElement {
   }
 
   private pinCycled(areaId: string, entityId: string): void {
-    const storage = browserStorage();
-    writeAreaPins(storage, areaId, cyclePin(readAreaPins(storage, areaId), entityId));
     const hass = this._hass;
-    if (hass) this.syncPinnedRow(hass, areaId);
-    this.applyAreaEdit();
+    if (!hass || this._config?.area !== areaId) return;
+    const next = cyclePin(cachedPins(areaId), entityId);
+    void saveAreaPins(hass, areaId, next).then(
+      () => {
+        if (this._hass !== hass || this._config?.area !== areaId) return;
+        this.syncPinnedRow(hass, areaId);
+        this.applyAreaEdit();
+      },
+      () => {
+        // A rejected save leaves the cache and the on-screen mode unchanged.
+      },
+    );
   }
 
   private pinnedHost(): HTMLElement {
@@ -599,7 +618,7 @@ class AreaCard extends HTMLElement {
   private syncPinnedRow(hass: ClassifierHass, areaId: string): void {
     const host = this.pinnedHost();
     const now = Date.now();
-    const pins = readAreaPins(browserStorage(), areaId);
+    const pins = cachedPins(areaId);
     const visible = visiblePinnedIds(
       pins,
       (id) => hass.states?.[id]?.state,

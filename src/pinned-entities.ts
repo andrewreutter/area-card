@@ -1,4 +1,7 @@
-/** localStorage is already per origin, so the area id does not need a hass URL. */
+/**
+ * Parsing and serialization stay pure. Persistence is Home Assistant frontend
+ * user data in user-data.ts.
+ */
 export const PINNED_KEY_PREFIX = "area-card-pinned:";
 
 const SECTION_TITLE = "custom:area-card-section-title";
@@ -31,18 +34,20 @@ function pinEntry(entry: unknown): { id: string; mode: "always" | "when-on" } | 
 }
 
 /**
- * Same storage key as before. A JSON array of strings is all always.
- * A while-on pin is `{ id, mode: "when-on" }` in that array. The last entry
- * for an id wins, and that id stays in first-seen order in only one list.
- * Null, bad JSON, and non-arrays are empty.
+ * A JSON string is parsed, then treated like an array. An already-parsed array
+ * uses the same rules. Strings are always-pins. `{ id, mode: "when-on" | "always" }`
+ * is a pin object. The last entry for an id wins, in first-seen order, and that
+ * id stays in only one list. Null, undefined, bad JSON, and non-arrays are empty.
  */
-export function parseAreaPins(raw: string | null | undefined): AreaPins {
-  if (!raw) return emptyPins();
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    return emptyPins();
+export function parseAreaPins(raw: unknown): AreaPins {
+  let parsed: unknown = raw;
+  if (typeof raw === "string") {
+    if (raw.length === 0) return emptyPins();
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      return emptyPins();
+    }
   }
   if (!Array.isArray(parsed)) return emptyPins();
   const modes = new Map<string, "always" | "when-on">();
@@ -61,37 +66,10 @@ export function parseAreaPins(raw: string | null | undefined): AreaPins {
   return pins;
 }
 
-export function readAreaPins(
-  storage: { getItem(key: string): string | null } | undefined,
-  areaId: string,
-): AreaPins {
-  if (!storage) return emptyPins();
-  try {
-    return parseAreaPins(storage.getItem(pinnedKey(areaId)));
-  } catch {
-    return emptyPins();
-  }
-}
-
-/**
- * A pure string array when every pin is always. While-on pins are objects,
- * written after the always ids. Hidden pins are left out.
- */
-export function writeAreaPins(
-  storage: { setItem(key: string, value: string): void } | undefined,
-  areaId: string,
-  pins: AreaPins,
-): void {
-  if (!storage) return;
-  const payload =
-    pins.whenOn.length === 0
-      ? pins.always
-      : [...pins.always, ...pins.whenOn.map((id) => ({ id, mode: "when-on" as const }))];
-  try {
-    storage.setItem(pinnedKey(areaId), JSON.stringify(payload));
-  } catch {
-    // A blocked or full localStorage should not stop a pin from cycling.
-  }
+/** Stored pin value. Strings only when every pin is always. */
+export function serializeAreaPins(pins: AreaPins): Array<string | { id: string; mode: "when-on" }> {
+  if (pins.whenOn.length === 0) return [...pins.always];
+  return [...pins.always, ...pins.whenOn.map((id) => ({ id, mode: "when-on" as const }))];
 }
 
 /** Always if the id is in that list, otherwise while on, otherwise hidden. */

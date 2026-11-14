@@ -483,6 +483,7 @@ describe("popup and button configs", () => {
       climate: ["sensor.temp"],
       lights: ["light.a"],
       mediaPlayers: ["media_player.tv"],
+      cameras: ["camera.webcam"],
       switches: ["switch.a"],
       occupancy: [{ entityId: "binary_sensor.motion" }],
       openings: ["binary_sensor.door"],
@@ -648,6 +649,7 @@ describe("popup and button configs", () => {
     const sectionIcons = [
       "mdi:lightbulb",
       "mdi:play-circle",
+      "mdi:video",
       "mdi:toggle-switch",
       "mdi:account",
       "mdi:door",
@@ -767,6 +769,7 @@ function listedIds(sections: AreaSections): string[] {
     ...sections.lights,
     ...Object.values(sections.lightLeds),
     ...sections.mediaPlayers,
+    ...sections.cameras,
     ...sections.switches,
     ...sections.occupancy.map((item) => item.entityId),
     ...sections.openings,
@@ -2179,6 +2182,7 @@ describe("climate subtitle", () => {
     assert.equal(ROLLUP_ORDER.includes("automations"), true);
     assert.deepEqual(collapsedDotSlots(["media"]), [
       "lights",
+      "cameras",
       "switches",
       "occupancy",
       "openings",
@@ -2432,6 +2436,220 @@ describe("floor dot rollup", () => {
       dots.map((dot) => dot.state),
       ["empty", "empty"],
     );
+  });
+});
+
+describe("cameras", () => {
+  const webcam = "camera.webcam";
+  const deviceId = "5e1233cc5cc0f01f36eba3ad24699a5a";
+
+  function manCaveHass(extra: Fixture = {}): ClassifierHass {
+    return hass({
+      areas: roomAreas,
+      devices: [{ id: deviceId, area_id: "office_of_drew" }, ...(extra.devices ?? [])],
+      entities: [
+        { entity_id: webcam, device_id: deviceId, platform: "generic" },
+        ...(extra.entities ?? []),
+      ],
+      states: {
+        [webcam]: state(webcam, "idle", { friendly_name: "Webcam" }),
+        ...(extra.states ?? {}),
+      },
+    });
+  }
+
+  it("classifies a generic camera assigned through the area device", () => {
+    const result = classifyArea(
+      manCaveHass({
+        entities: [
+          { entity_id: "camera.other_room", area_id: "bedroom", platform: "generic" },
+          { entity_id: "camera.hidden_webcam", area_id: "office_of_drew", platform: "generic", hidden_by: "user" },
+          { entity_id: "camera.diag", area_id: "office_of_drew", platform: "generic", entity_category: "diagnostic" },
+          { entity_id: "camera.door", area_id: "office_of_drew", platform: "generic" },
+          { entity_id: "camera.template_cam", area_id: "office_of_drew", platform: "template" },
+          { entity_id: "light.desk", area_id: "office_of_drew" },
+        ],
+        states: {
+          "camera.other_room": state("camera.other_room", "streaming", { friendly_name: "Bedroom Camera" }),
+          "camera.hidden_webcam": state("camera.hidden_webcam", "streaming", { friendly_name: "Hidden Webcam" }),
+          "camera.diag": state("camera.diag", "idle", { friendly_name: "Diagnostic Camera" }),
+          "camera.door": state("camera.door", "idle", { friendly_name: "Door Camera" }),
+          "camera.template_cam": state("camera.template_cam", "idle", { friendly_name: "Template Camera" }),
+          "light.desk": state("light.desk", "off", { friendly_name: "Desk" }),
+        },
+      }),
+      "office_of_drew",
+    );
+    assert.deepEqual(result.cameras, ["camera.door", "camera.template_cam", webcam]);
+    assert.deepEqual(result.lights, ["light.desk"]);
+    assert.equal(result.helpers.includes("camera.template_cam"), false);
+    for (const excluded of ["camera.other_room", "camera.hidden_webcam", "camera.diag"]) {
+      assert.equal(listedIds(result).includes(excluded), false, excluded);
+    }
+  });
+
+  it("fills the cameras dot for recording or streaming and leaves an idle camera hollow", () => {
+    const slots = collapsedDotSlots([]);
+    assert.equal(slots[slots.indexOf("media") + 1], "cameras");
+    assert.equal(slots.includes("climate"), false);
+    assert.equal(slots.includes("automations"), false);
+    assert.equal(sectionIcon("cameras"), "mdi:video");
+    assert.equal(sectionTitle("cameras"), "Cameras");
+
+    const idleSections = { ...emptySections(), cameras: [webcam] };
+    const idleStates = { [webcam]: state(webcam, "idle", { friendly_name: "Webcam" }) };
+    const idle = sectionRollups(idleSections, idleStates);
+    assert.equal(rollupLabel(idle[0]!), "Cameras 0/1 On");
+    const idleButton = buildButtonConfig({
+      areaId: "office_of_drew",
+      name: "Man Cave",
+      icon: "mdi:office-building",
+      sections: idleSections,
+      states: idleStates,
+      dotSlots: slots,
+    });
+    const idleDots = idleButton.sub_button as Array<{ css_class: string; icon: string }>;
+    assert.equal(idleDots[slots.indexOf("cameras")]?.css_class, "area-dot-cameras-off");
+    assert.equal(idleDots[slots.indexOf("cameras")]?.icon, "mdi:video");
+    assert.match(String(idleButton.styles), /area-dot-cameras-off \{[^}]*box-shadow: inset 0 0 0 1\.5px rgb\(244, 67, 54\)/);
+
+    for (const value of ["streaming", "recording"]) {
+      const live = sectionRollups(idleSections, { [webcam]: state(webcam, value, { friendly_name: "Webcam" }) });
+      assert.equal(rollupLabel(live[0]!), "Cameras 1/1 On", value);
+      assert.equal(live[0]?.active, 1, value);
+    }
+
+    const mixed = sectionRollups(
+      { ...emptySections(), cameras: [webcam, "camera.door"] },
+      {
+        [webcam]: state(webcam, "idle", { friendly_name: "Webcam" }),
+        "camera.door": state("camera.door", "recording", { friendly_name: "Door Camera" }),
+      },
+    );
+    assert.equal(rollupLabel(mixed[0]!), "Cameras 1/2 On");
+    const mixedButton = buildButtonConfig({
+      areaId: "office_of_drew",
+      name: "Man Cave",
+      icon: "mdi:office-building",
+      sections: { ...emptySections(), cameras: [webcam, "camera.door"] },
+      states: {
+        [webcam]: state(webcam, "idle"),
+        "camera.door": state("camera.door", "streaming"),
+      },
+      dotSlots: slots,
+    });
+    const mixedDots = mixedButton.sub_button as Array<{ css_class: string }>;
+    assert.equal(mixedDots[slots.indexOf("cameras")]?.css_class, "area-dot-cameras-on");
+
+    const absent = buildButtonConfig({
+      areaId: "office_of_drew",
+      name: "Man Cave",
+      icon: "mdi:office-building",
+      sections: emptySections(),
+      dotSlots: slots,
+    });
+    const absentDots = absent.sub_button as Array<{ css_class: string }>;
+    assert.equal(absentDots[slots.indexOf("cameras")]?.css_class, "area-dot-cameras-empty");
+    assert.match(String(absent.styles), /visibility: hidden !important/);
+  });
+
+  it("omits the cameras slot and popup section when cameras is hidden", () => {
+    const hide: RollupId[] = ["cameras"];
+    assert.deepEqual(parseHideSections(["cameras"]), ["cameras"]);
+    const sections = { ...emptySections(), cameras: [webcam], lights: ["light.desk"] };
+    const states = {
+      [webcam]: state(webcam, "streaming", { friendly_name: "Man Cave Webcam" }),
+      "light.desk": state("light.desk", "on", { friendly_name: "Desk" }),
+    };
+    const visible = withoutSections(sections, hide);
+    assert.deepEqual(visible.cameras, []);
+    assert.deepEqual(visible.lights, ["light.desk"]);
+    const slots = collapsedDotSlots(hide);
+    assert.equal(slots.includes("cameras"), false);
+    const button = buildButtonConfig({
+      areaId: "office_of_drew",
+      name: "Man Cave",
+      icon: "mdi:office-building",
+      sections: visible,
+      states,
+      dotSlots: slots,
+    });
+    const dots = button.sub_button as Array<{ css_class: string }>;
+    assert.equal(dots.length, slots.length);
+    assert.equal(dots.some((dot) => dot.css_class.includes("cameras")), false);
+    assert.equal(dots[slots.indexOf("lights")]?.css_class, "area-dot-lights-on");
+    const titles = buildPopupCards(visible, states, "Man Cave")
+      .filter((card) => card.title)
+      .map((card) => card.title);
+    assert.equal(titles.includes("Cameras"), false);
+    assert.equal(titles.includes("Lights"), true);
+  });
+
+  it("shows a picture-entity for the webcam and strips the room name", () => {
+    const cards = buildPopupCards(
+      { ...emptySections(), cameras: [webcam], mediaPlayers: ["media_player.tv"] },
+      {
+        [webcam]: state(webcam, "idle", {
+          friendly_name: "Man Cave Webcam",
+          entity_picture: "/api/camera_proxy/camera.webcam",
+        }),
+        "media_player.tv": state("media_player.tv", "off", { friendly_name: "TV" }),
+      },
+      "Man Cave",
+    );
+    const titles = cards.filter((card) => card.title).map((card) => card.title);
+    assert.deepEqual(titles, ["Status", "Media players", "Cameras"]);
+    const camera = cards.find((card) => card.entity === webcam);
+    assert.equal(camera?.type, "picture-entity");
+    assert.equal(camera?.camera_image, webcam);
+    assert.equal(camera?.camera_view, "auto");
+    assert.equal(camera?.show_name, true);
+    assert.equal(camera?.name, "Webcam");
+    assert.deepEqual(camera?.tap_action, { action: "more-info" });
+    assert.deepEqual(camera?.grid_options, { columns: 12 });
+    assert.equal(JSON.stringify(camera).includes("custom:area-card-mushroom"), false);
+    assert.equal(JSON.stringify(camera).includes("{{"), false);
+
+    const plain = buildPopupCards(
+      { ...emptySections(), cameras: [webcam] },
+      { [webcam]: state(webcam, "idle", { friendly_name: "Webcam" }) },
+      "Man Cave",
+    ).find((card) => card.entity === webcam);
+    assert.equal(plain?.name, "Webcam");
+
+    assert.deepEqual(
+      buildPopupCards(emptySections()).filter((card) => card.title).map((card) => card.title),
+      [],
+    );
+  });
+
+  it("keeps the floor cameras column only when some area has a camera", () => {
+    const withCamera = { ...emptySections(), cameras: [webcam] };
+    const without = emptySections();
+    const kept = ROLLUP_ORDER.filter((id) => [withCamera, without].every((section) => !sectionHasEntities(id, section)));
+    assert.equal(kept.includes("cameras"), false);
+    const slots = collapsedDotSlots(kept);
+    assert.equal(slots.includes("cameras"), true);
+    const hidden = ROLLUP_ORDER.filter((id) => [without, emptySections()].every((section) => !sectionHasEntities(id, section)));
+    assert.equal(hidden.includes("cameras"), true);
+    assert.equal(collapsedDotSlots(hidden).includes("cameras"), false);
+
+    const idle = sectionRollups(withCamera, { [webcam]: state(webcam, "idle", { friendly_name: "Webcam" }) });
+    const live = sectionRollups(
+      { ...emptySections(), cameras: ["camera.door"] },
+      { "camera.door": state("camera.door", "streaming", { friendly_name: "Door Camera" }) },
+    );
+    const dots = floorDotRow(["cameras"], [idle, live, []]);
+    assert.equal(dots[0]?.state, "on");
+    assert.equal(dots[0]?.label, "Cameras 1/2 On");
+    assert.equal(dots[0]?.icon, "mdi:video");
+    const hollow = floorDotRow(["cameras"], [idle]);
+    assert.equal(hollow[0]?.state, "off");
+    assert.equal(hollow[0]?.background, "transparent");
+    assert.equal(hollow[0]?.ring, "rgb(244, 67, 54)");
+    const missing = floorDotRow(["cameras"], [[]]);
+    assert.equal(missing[0]?.state, "empty");
+    assert.equal(missing[0]?.label, null);
   });
 });
 

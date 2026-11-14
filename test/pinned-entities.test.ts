@@ -14,9 +14,8 @@ import {
   pinnedSideBySideGridStyles,
   pinnedSideBySideHostStyles,
   pinnedSideBySideStyles,
-  readAreaPins,
   selectPinnedCards,
-  writeAreaPins,
+  serializeAreaPins,
   type AreaPins,
   type PinnedLayoutRow,
 } from "../src/pinned-entities";
@@ -76,73 +75,43 @@ describe("parseAreaPins", () => {
     assert.deepEqual(parseAreaPins('{"id":"light.a","mode":"when-on"}'), emptyPins());
     assert.deepEqual(parseAreaPins('"light.a"'), emptyPins());
     assert.deepEqual(parseAreaPins("null"), emptyPins());
-  });
-});
-
-describe("readAreaPins", () => {
-  it("reads the area key", () => {
-    const storage = {
-      getItem(key: string) {
-        assert.equal(key, "area-card-pinned:kitchen");
-        return '["light.kitchen"]';
-      },
-    };
-    assert.deepEqual(readAreaPins(storage, "kitchen"), { always: ["light.kitchen"], whenOn: [] });
+    assert.deepEqual(parseAreaPins(1), emptyPins());
+    assert.deepEqual(parseAreaPins({ id: "light.a", mode: "when-on" }), emptyPins());
   });
 
-  it("returns empty pins when storage is missing", () => {
-    assert.deepEqual(readAreaPins(undefined, "kitchen"), emptyPins());
-  });
-
-  it("returns empty pins when getItem throws", () => {
-    const storage = {
-      getItem(): string | null {
-        throw new Error("blocked");
-      },
-    };
-    assert.deepEqual(readAreaPins(storage, "kitchen"), emptyPins());
-  });
-});
-
-describe("writeAreaPins", () => {
-  it("writes a pure string array when every pin is always", () => {
-    let written: { key: string; value: string } | undefined;
-    const storage = {
-      setItem(key: string, value: string) {
-        written = { key, value };
-      },
-    };
-    writeAreaPins(storage, "office", { always: ["light.desk", "switch.lamp"], whenOn: [] });
-    assert.deepEqual(written, {
-      key: "area-card-pinned:office",
-      value: '["light.desk","switch.lamp"]',
+  it("accepts an already-parsed array", () => {
+    assert.deepEqual(parseAreaPins(["light.desk", { id: "media_player.tv", mode: "when-on" }]), {
+      always: ["light.desk"],
+      whenOn: ["media_player.tv"],
     });
+    assert.deepEqual(
+      parseAreaPins([
+        "light.a",
+        { id: "light.a", mode: "when-on" },
+        { id: "switch.b", mode: "always" },
+      ]),
+      { always: ["switch.b"], whenOn: ["light.a"] },
+    );
   });
+});
 
-  it("writes strings for always and objects for while on", () => {
-    let written = "";
-    const storage = {
-      setItem(_key: string, value: string) {
-        written = value;
-      },
-    };
-    writeAreaPins(storage, "office", { always: ["light.desk"], whenOn: ["media_player.tv"] });
-    assert.equal(written, '["light.desk",{"id":"media_player.tv","mode":"when-on"}]');
-    writeAreaPins(storage, "office", { always: [], whenOn: ["media_player.tv"] });
-    assert.equal(written, '[{"id":"media_player.tv","mode":"when-on"}]');
-  });
-
-  it("does nothing when storage is missing", () => {
-    writeAreaPins(undefined, "office", { always: ["light.desk"], whenOn: [] });
-  });
-
-  it("does not throw when setItem throws", () => {
-    const storage = {
-      setItem(): void {
-        throw new Error("full");
-      },
-    };
-    assert.doesNotThrow(() => writeAreaPins(storage, "office", { always: ["light.desk"], whenOn: [] }));
+describe("serializeAreaPins", () => {
+  it("uses strings only when every pin is always", () => {
+    const cases: AreaPins[] = [
+      { always: ["light.desk", "switch.lamp"], whenOn: [] },
+      { always: ["light.desk"], whenOn: ["media_player.tv"] },
+      { always: [], whenOn: ["media_player.tv"] },
+      { always: [], whenOn: [] },
+    ];
+    assert.deepEqual(serializeAreaPins(cases[0]), ["light.desk", "switch.lamp"]);
+    assert.deepEqual(serializeAreaPins(cases[1]), ["light.desk", { id: "media_player.tv", mode: "when-on" }]);
+    assert.deepEqual(serializeAreaPins(cases[2]), [{ id: "media_player.tv", mode: "when-on" }]);
+    assert.deepEqual(serializeAreaPins(cases[3]), []);
+    for (const pins of cases) {
+      const payload = serializeAreaPins(pins);
+      assert.ok(Array.isArray(payload));
+      assert.equal(typeof payload, "object");
+    }
   });
 });
 

@@ -70,6 +70,7 @@ export interface AreaSections {
   lights: string[];
   lightLeds: Record<string, string>;
   mediaPlayers: string[];
+  cameras: string[];
   switches: string[];
   occupancy: OccupancyItem[];
   openings: string[];
@@ -88,6 +89,7 @@ export function emptySections(): AreaSections {
     lights: [],
     lightLeds: {},
     mediaPlayers: [],
+    cameras: [],
     switches: [],
     occupancy: [],
     openings: [],
@@ -206,6 +208,12 @@ export function classifyArea(hass: ClassifierHass, areaId: string): AreaSections
 
     if (isLedSwitch(id)) continue;
 
+    if (domain === "camera") {
+      if (suppressed) continue;
+      sections.cameras.push(id);
+      continue;
+    }
+
     if (entry.platform === "template") {
       sections.helpers.push(id);
       continue;
@@ -266,6 +274,7 @@ export function classifyArea(hass: ClassifierHass, areaId: string): AreaSections
   sections.climate = sortIds(sections.climate, states);
   sections.lights = sortIds(sections.lights, states);
   sections.mediaPlayers = sortIds(sections.mediaPlayers, states);
+  sections.cameras = sortIds(sections.cameras, states);
   sections.switches = sortIds(sections.switches, states);
   sections.openings = sortIds(sections.openings, states);
   sections.helpers = sortIds(sections.helpers, states);
@@ -292,6 +301,7 @@ export function membershipKey(areaId: string, name: string, icon: string, sectio
     sections.lights.join(","),
     leds,
     sections.mediaPlayers.join(","),
+    sections.cameras.join(","),
     sections.switches.join(","),
     occupancy,
     sections.openings.join(","),

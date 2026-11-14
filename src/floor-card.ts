@@ -1,6 +1,6 @@
 import { loadDisabledAutomations } from "./automations";
 import { hideAreaDotTooltip, showAreaDotTooltip } from "./dot-tooltip";
-import { browserStorage, floorRuntimeConfig, readFloorExpanded, writeFloorExpanded } from "./floor-state";
+import { floorExpandedKey, floorRuntimeConfig } from "./floor-state";
 import { areasOnFloor, floorDisplay, type AreaRef } from "./floors";
 import {
   DOT_GAP_PX,
@@ -17,6 +17,7 @@ import {
   type RollupId,
 } from "./rollups";
 import { classifyArea, type AreaSections, type ClassifierHass } from "./sections";
+import { cachedFloorExpanded, ensureUserData, saveFloorExpanded, subscribeUserData } from "./user-data";
 
 interface FloorCardConfig {
   floor: string;
@@ -53,6 +54,7 @@ class FloorCard extends HTMLElement {
   private renderedHide?: string;
   private running = false;
   private queued = false;
+  private unsubscribeUserData?: () => void;
 
   static getConfigForm(): typeof CONFIG_FORM {
     return CONFIG_FORM;
@@ -85,9 +87,6 @@ class FloorCard extends HTMLElement {
       throw new Error("Floor is required");
     }
     if (this._config?.floor !== config.floor) {
-      // Apply the stored state before the first render so the chevron and
-      // room list do not flash the default.
-      this._expanded = readFloorExpanded(browserStorage(), config.floor);
       this.headerEl?.remove();
       this.bodyEl?.remove();
       this.headerEl = undefined;
@@ -116,10 +115,21 @@ class FloorCard extends HTMLElement {
 
   connectedCallback(): void {
     this.style.display = "block";
+    this.unsubscribeUserData?.();
+    this.unsubscribeUserData = subscribeUserData((key: string) => {
+      const floorId = this._config?.floor;
+      if (!floorId || key !== floorExpandedKey(floorId)) return;
+      this._expanded = cachedFloorExpanded(floorId);
+      if (!this.headerEl) return;
+      this.syncChevron();
+      this.syncBody();
+    });
     this.schedule();
   }
 
   disconnectedCallback(): void {
+    this.unsubscribeUserData?.();
+    this.unsubscribeUserData = undefined;
     this.fitObserver?.disconnect();
     this.fitObserver = undefined;
   }
@@ -149,6 +159,9 @@ class FloorCard extends HTMLElement {
 
     const hass = this._hass;
     const floorId = this._config.floor;
+    await ensureUserData(hass);
+    if (this._hass !== hass || this._config?.floor !== floorId) return;
+    this._expanded = cachedFloorExpanded(floorId);
     const { name, icon } = floorDisplay(hass, floorId);
     const areas = areasOnFloor(hass, floorId);
     const classified = areas.map((area) => classifyArea(hass, area.areaId));
@@ -460,10 +473,21 @@ class FloorCard extends HTMLElement {
   }
 
   private toggle(): void {
-    this._expanded = !this._expanded;
-    if (this._config) writeFloorExpanded(browserStorage(), this._config.floor, this._expanded);
-    this.syncChevron();
-    this.syncBody();
+    const hass = this._hass;
+    const floorId = this._config?.floor;
+    if (!hass || !floorId) return;
+    const next = !this._expanded;
+    void saveFloorExpanded(hass, floorId, next).then(
+      () => {
+        if (this._config?.floor !== floorId) return;
+        this._expanded = next;
+        this.syncChevron();
+        this.syncBody();
+      },
+      () => {
+        // A rejected save leaves the floor open or closed as it was.
+      },
+    );
   }
 
   private syncBody(): void {

@@ -4,6 +4,7 @@ export const ROLLUP_ORDER = [
   "climate",
   "lights",
   "media",
+  "cameras",
   "switches",
   "occupancy",
   "openings",
@@ -39,6 +40,7 @@ export interface SectionRollup {
 }
 
 const MEDIA_ACTIVE = new Set(["on", "playing", "paused", "buffering"]);
+const CAMERA_ACTIVE = new Set(["recording", "streaming"]);
 const BINARY_DOMAINS = new Set(["input_boolean", "switch", "binary_sensor"]);
 
 const META: Record<RollupId, Omit<SectionRollup, "id" | "active" | "total">> = {
@@ -61,6 +63,13 @@ const META: Record<RollupId, Omit<SectionRollup, "id" | "active" | "total">> = {
     icon: "mdi:play-circle",
     iconColor: "purple",
     color: "rgb(146, 107, 199)",
+    word: "On",
+  },
+  cameras: {
+    title: "Cameras",
+    icon: "mdi:video",
+    iconColor: "red",
+    color: "rgb(244, 67, 54)",
     word: "On",
   },
   switches: {
@@ -122,6 +131,7 @@ export function sectionRollups(
   add("climate", countActive(climate, states, isOn), climate.length);
   add("lights", countActive(sections.lights, states, isOn), sections.lights.length);
   add("media", countActive(sections.mediaPlayers, states, isMediaOn), sections.mediaPlayers.length);
+  add("cameras", countActive(sections.cameras, states, isCameraActive), sections.cameras.length);
   add("switches", countActive(sections.switches, states, isOn), sections.switches.length);
   add(
     "occupancy",
@@ -217,6 +227,8 @@ export function rollupEntityIds(id: RollupId, sections: AreaSections): string[] 
       return sections.lights.slice();
     case "media":
       return sections.mediaPlayers.slice();
+    case "cameras":
+      return sections.cameras.slice();
     case "switches":
       return sections.switches.slice();
     case "occupancy":
@@ -254,6 +266,7 @@ export function sectionHasEntities(id: RollupId, sections: AreaSections): boolea
     case "climate": return sections.climate.length > 0;
     case "lights": return sections.lights.length > 0;
     case "media": return sections.mediaPlayers.length > 0;
+    case "cameras": return sections.cameras.length > 0;
     case "switches": return sections.switches.length > 0;
     case "occupancy": return sections.occupancy.length > 0;
     case "openings": return sections.openings.length > 0;
@@ -271,6 +284,7 @@ export function withoutSections(sections: AreaSections, hide: readonly RollupId[
       case "climate": result.climate = []; break;
       case "lights": result.lights = []; result.lightLeds = {}; break;
       case "media": result.mediaPlayers = []; break;
+      case "cameras": result.cameras = []; break;
       case "switches": result.switches = []; break;
       case "occupancy": result.occupancy = []; break;
       case "openings": result.openings = []; break;
@@ -428,6 +442,10 @@ function isOn(_entityId: string, value: string): boolean {
 
 function isMediaOn(_entityId: string, value: string): boolean {
   return MEDIA_ACTIVE.has(value);
+}
+
+function isCameraActive(_entityId: string, value: string): boolean {
+  return CAMERA_ACTIVE.has(value);
 }
 
 function isOpeningActive(entityId: string, value: string): boolean {

@@ -11,7 +11,6 @@ export function floorRuntimeConfig(floor: string): { floor: string; type: typeof
   return { floor, type: BUBBLE_SHARED_STACK_TYPE };
 }
 
-/** localStorage is already per origin, so the floor id does not need a hass URL. */
 export const FLOOR_EXPANDED_KEY_PREFIX = "area-card-floor-expanded:";
 
 export function floorExpandedKey(floorId: string): string {
@@ -47,10 +46,3 @@ export function writeFloorExpanded(
   }
 }
 
-export function browserStorage(): Storage | undefined {
-  try {
-    return globalThis.localStorage;
-  } catch {
-    return undefined;
-  }
-}
