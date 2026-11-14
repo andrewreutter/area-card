@@ -261,6 +261,7 @@ export function classifyArea(hass: ClassifierHass, areaId: string): AreaSections
   }
 
   appendNamedAutomations(hass, areaId, allEntries, states, sections);
+  appendSatelliteMediaPlayers(sections, allEntries, devices, states);
 
   sections.climate = sortIds(sections.climate, states);
   sections.lights = sortIds(sections.lights, states);
@@ -459,6 +460,36 @@ function assignLightLeds(
   }
 
   return Object.fromEntries(assigned);
+}
+
+function appendSatelliteMediaPlayers(
+  sections: AreaSections,
+  allEntries: RegistryEntry[],
+  devices: Record<string, DeviceEntry>,
+  states: Record<string, EntityState>,
+): void {
+  const byId = new Map(allEntries.map((entry) => [entry.entity_id, entry]));
+  const seen = new Set(sections.mediaPlayers);
+  for (const item of sections.satellites) {
+    const playerId = satelliteMediaPlayerId(item.entityId);
+    if (!playerId || seen.has(playerId)) continue;
+    const entry = byId.get(playerId);
+    if (!entry || isHidden(entry) || isDiagnosticOrConfig(entry) || !states[playerId]) continue;
+    const device = entry.device_id ? devices[entry.device_id] : undefined;
+    if (!isKioskSatellite(device)) continue;
+    sections.mediaPlayers.push(playerId);
+    seen.add(playerId);
+  }
+}
+
+function satelliteMediaPlayerId(entityId: string): string | undefined {
+  const prefix = "assist_satellite.";
+  if (!entityId.startsWith(prefix)) return undefined;
+  let objectId = entityId.slice(prefix.length);
+  const suffix = "_assist_satellite";
+  if (objectId.endsWith(suffix)) objectId = objectId.slice(0, -suffix.length);
+  if (!objectId) return undefined;
+  return `media_player.${objectId}`;
 }
 
 function satelliteItem(entry: RegistryEntry, entries: RegistryEntry[], states: Record<string, EntityState>): SatelliteItem {

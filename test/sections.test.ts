@@ -860,6 +860,46 @@ describe("satellite scope", () => {
       ["Status", "Lights", "Entries", "Satellites"],
     );
   });
+
+  it("pulls an unassigned Kiosk Satellite player into the satellite area by entity id", () => {
+    const fixture = hass({
+      devices: [
+        { id: "updoot1", area_id: "office_of_drew", name: "Updoot1", manufacturer: "kiosk_satellite" },
+        { id: "updoot-player", name: "Updoot", manufacturer: "Kiosk Satellite" },
+        { id: "updoot2", area_id: "bedroom", name: "Updoot2", manufacturer: "kiosk_satellite" },
+        { id: "updoot2-player", name: "Updoot2", manufacturer: "Kiosk Satellite" },
+        { id: "other-player", name: "Updoot", manufacturer: "Music Assistant" },
+      ],
+      entities: [
+        { entity_id: "assist_satellite.updoot_assist_satellite", device_id: "updoot1" },
+        { entity_id: "media_player.updoot", device_id: "updoot-player" },
+        { entity_id: "button.updoot_favorite_current_song", device_id: "updoot-player" },
+        { entity_id: "assist_satellite.updoot2_assist_satellite", device_id: "updoot2" },
+        { entity_id: "media_player.updoot2", device_id: "updoot2-player", hidden_by: "user" },
+        { entity_id: "media_player.tv", area_id: "office_of_drew" },
+        { entity_id: "media_player.updoot_other", device_id: "other-player" },
+      ],
+      states: {
+        "media_player.updoot": state("media_player.updoot", "idle", { friendly_name: "Updoot" }),
+        "media_player.tv": state("media_player.tv", "playing", { friendly_name: "Office TV" }),
+      },
+    });
+
+    const office = classifyArea(fixture, "office_of_drew");
+    assert.deepEqual(office.satellites, [{ entityId: "assist_satellite.updoot_assist_satellite" }]);
+    assert.deepEqual(office.mediaPlayers, ["media_player.tv", "media_player.updoot"]);
+    assert.equal(office.switches.includes("button.updoot_favorite_current_song"), false);
+
+    const bedroom = classifyArea(fixture, "bedroom");
+    assert.deepEqual(bedroom.satellites, [{ entityId: "assist_satellite.updoot2_assist_satellite" }]);
+    assert.deepEqual(bedroom.mediaPlayers, []);
+
+    const cards = buildPopupCards(office, fixture.states ?? {});
+    const player = cards.find((card) => card.entity === "media_player.updoot");
+    assert.equal(player?.type, "media-control");
+    assert.equal(cards.some((card) => card.entity === "button.updoot_favorite_current_song"), false);
+    assert.ok(cards.some((card) => card.title === "Media players"));
+  });
 });
 
 describe("section rollups", () => {
